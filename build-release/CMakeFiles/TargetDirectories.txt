@@ -1,3 +1,0 @@
-/Users/ubreglia/Desktop/magi-engine/build-release/CMakeFiles/magi_engine.dir
-/Users/ubreglia/Desktop/magi-engine/build-release/CMakeFiles/edit_cache.dir
-/Users/ubreglia/Desktop/magi-engine/build-release/CMakeFiles/rebuild_cache.dir

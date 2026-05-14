@@ -1,5 +1,44 @@
+# Build outputs
 build/
-.cache/
-compile_commands.json
-.DS_Store
+build-*/
+out/
 
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.dSYM/
+magi_engine
+
+# Local caches and tooling
+.cache/
+.clangd/
+.ccls-cache/
+
+# Runtime artifacts / local data
+*.log
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+
+# Editor and OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
