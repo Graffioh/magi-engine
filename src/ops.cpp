@@ -109,23 +109,25 @@ void mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
-// IN = IN / RMS(IN)
-void RMSNorm(Tensor& IN) {
-    float sum_squares = 0.0f;
-    int count = IN.rows * IN.cols;
-
-    for (int i = 0; i < count; ++i) {
-        sum_squares += IN.data[i] * IN.data[i];
+// IN(i, j) = IN(i, j) / rms(IN[i, :]) * weight[j]
+void RMSNorm(Tensor& IN, const std::vector<float>& weight, float epsilon) {
+    if (static_cast<int>(weight.size()) != IN.cols) {
+        throw std::invalid_argument("RMSNorm weight size must match IN.cols");
     }
 
-    // compute rms
-    const float mean_squares = sum_squares / count;
-    const float epsilon = 1e-8f; // Small constant to prevent division by zero
-    const float rms = std::sqrt(mean_squares + epsilon);
+    for (int i = 0; i < IN.rows; ++i) {
+        float sum_squares = 0.0f;
+        for (int j = 0; j < IN.cols; ++j) {
+            const float v = IN(i, j);
+            sum_squares += v * v;
+        }
 
-    // use rms to normalize the input tensor
-    for (int i = 0; i < count; ++i) {
-        IN.data[i] /= rms;
+        const float mean_squares = sum_squares / IN.cols;
+        const float inv_rms = 1.0f / std::sqrt(mean_squares + epsilon);
+
+        for (int j = 0; j < IN.cols; ++j) {
+            IN(i, j) = IN(i, j) * inv_rms * weight[j];
+        }
     }
 }
 
