@@ -4,6 +4,7 @@
 
 Tensor transpose(const Tensor& input);
 void matmul(const Tensor& A, const Tensor& B, Tensor& OUT);
+void matmul_nt(const Tensor& A, const Tensor& B, Tensor& OUT);
 void matvec(const Tensor& A, const std::vector<float>& x, Tensor& OUT);
 void add(const Tensor& A, const Tensor& B, Tensor& OUT);
 void mul(const Tensor& A, const Tensor& B, Tensor& OUT);

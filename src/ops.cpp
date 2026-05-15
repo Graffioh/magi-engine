@@ -38,6 +38,27 @@ void matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
+// out = A ∙ B^T
+// A: (M, K), B: (N, K)  ->  OUT: (M, N)
+void matmul_nt(const Tensor& A, const Tensor& B, Tensor& OUT) {
+    if (A.cols != B.cols) {
+        throw std::invalid_argument("Incompatible dimensions for matmul_nt (A.cols must equal B.cols)");
+    }
+    OUT.rows = A.rows;
+    OUT.cols = B.rows;
+    OUT.data.resize(OUT.rows * OUT.cols, 0.0f);
+
+    for (int i = 0; i < OUT.rows; ++i) {
+        for (int j = 0; j < OUT.cols; ++j) {
+            float sum = 0.0f;
+            for (int k = 0; k < A.cols; ++k) {
+                sum += A(i, k) * B(j, k);
+            }
+            OUT(i, j) = sum;
+        }
+    }
+}
+
 // out = weight * x
 void matvec(const Tensor& A, const std::vector<float>& x, Tensor& OUT) {
     if (A.cols != x.size()) {

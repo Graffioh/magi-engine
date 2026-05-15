@@ -8,8 +8,9 @@ struct LinearLayer {
   Tensor W;
   std::vector<float> bias;
 
-  LinearLayer(int input_dim, int output_dim);
+  LinearLayer(int input_dim, int output_dim, bool use_bias = false);
   void forward(const Tensor& IN, Tensor& OUT) const;
+  bool has_bias() const { return !bias.empty(); }
 };
 
 struct GatedMLP {

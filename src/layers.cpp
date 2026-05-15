@@ -2,21 +2,22 @@
 
 #include "ops.h"
 
-LinearLayer::LinearLayer(int input_dim, int output_dim) {
+LinearLayer::LinearLayer(int input_dim, int output_dim, bool use_bias) {
   W.rows = output_dim;
   W.cols = input_dim;
   W.data.resize(output_dim * input_dim, 0.0f);
 
-  bias.resize(output_dim, 0.0f);
+  bias.resize(use_bias ? output_dim : 0, 0.0f);
 }
 
 void LinearLayer::forward(const Tensor &IN, Tensor &OUT) const {
-  Tensor WT = transpose(W);
-  matmul(IN, WT, OUT); // (seq_len, input_dim) x (input_dim, output_dim) -> (seq_len, output_dim)
+  matmul_nt(IN, W, OUT); // (seq_len, input_dim) x (output_dim, input_dim)^T -> (seq_len, output_dim)
 
-  for (int i = 0; i < OUT.rows; ++i) {
-    for (int j = 0; j < OUT.cols; ++j) {
-      OUT(i, j) += bias[j];
+  if (has_bias()) {
+    for (int i = 0; i < OUT.rows; ++i) {
+      for (int j = 0; j < OUT.cols; ++j) {
+        OUT(i, j) += bias[j];
+      }
     }
   }
 }
