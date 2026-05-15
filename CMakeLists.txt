@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(magi_engine
   src/main.cpp
+  src/layers.cpp
   src/ops.cpp
 )
 

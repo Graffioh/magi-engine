@@ -42,15 +42,12 @@ int main() {
   Tensor OUT;
 
   matmul(A, B, OUT);
-  matmul_bad_locality(A, B, OUT);
 
-  double good_ms = time_matmul(matmul, A, B, OUT, runs);
-  double bad_ms = time_matmul(matmul_bad_locality, A, B, OUT, runs);
+  double matmul_ms = time_matmul(matmul, A, B, OUT, runs);
 
   std::cout << "matrix size: " << size << " x " << size << '\n';
   std::cout << "runs: " << runs << '\n';
-  std::cout << "B transposed inside matmul: " << good_ms << " ms/run" << '\n';
-  std::cout << "plain B access: " << bad_ms << " ms/run" << '\n';
+  std::cout << "matmul time: " << matmul_ms << " ms/run" << '\n';
 
   return 0;
 }
