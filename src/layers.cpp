@@ -1,4 +1,5 @@
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "layers.h"
@@ -70,12 +71,20 @@ SelfAttention::SelfAttention(
     num_heads(num_heads),
     num_kv_heads(num_kv_heads),
     head_dim(hidden_size / num_heads) {
+  if (num_heads <= 0 || num_kv_heads <= 0) {
+    throw std::invalid_argument("num_heads and num_kv_heads must be positive");
+  }
+
   if (hidden_size % num_heads != 0) {
     throw std::invalid_argument("hidden_size must be divisible by num_heads");
   }
 
   if (num_heads % num_kv_heads != 0) {
     throw std::invalid_argument("num_heads must be divisible by num_kv_heads");
+  }
+
+  if (head_dim % 2 != 0) {
+    throw std::invalid_argument("head_dim must be even for RoPE");
   }
 }
 
@@ -88,23 +97,55 @@ void SelfAttention::causal_mask(Tensor& attn_scores) const {
   }
 }
 
-void SelfAttention::attn( const Tensor& q, const Tensor& k, const Tensor& v, Tensor& OUT) const {
-  Tensor scores;
+void SelfAttention::attn(const Tensor& q, const Tensor& k, const Tensor& v, Tensor& OUT) const {
+  if (q.rows != k.rows || q.rows != v.rows) {
+    throw std::invalid_argument("q, k, and v must have the same sequence length");
+  }
+  if (q.cols != num_heads * head_dim) {
+    throw std::invalid_argument("q cols must equal num_heads * head_dim");
+  }
+  if (k.cols != num_kv_heads * head_dim || v.cols != num_kv_heads * head_dim) {
+    throw std::invalid_argument("k and v cols must equal num_kv_heads * head_dim");
+  }
 
-  // scores = q @ k^T
-  matmul_nt(q, k, scores);
+  const int seq_len = q.rows;
+  const int kv_group_size = num_heads / num_kv_heads;
+  const float scale_factor = 1.0f / std::sqrt(static_cast<float>(head_dim));
 
-  // scores = scores / sqrt(head_dim)
-  scale(scores, 1.0f / std::sqrt(static_cast<float>(head_dim)));
+  OUT = Tensor(seq_len, hidden_size); // (seq_len, num_heads * head_dim)
 
-  // prevent token i from attending to future token j > i
-  causal_mask(scores);
+  for (int q_head = 0; q_head < num_heads; ++q_head) {
+    // Grouped-query attention: several query heads share one key/value head.
+    const int kv_head = q_head / kv_group_size;
+    const int q_offset = q_head * head_dim;
+    const int kv_offset = kv_head * head_dim;
 
-  // softmax each row
-  softmax(scores);
+    Tensor scores(seq_len, seq_len); // (query_pos, key_pos)
 
-  // OUT = scores @ v
-  matmul(scores, v, OUT);
+    for (int query_pos = 0; query_pos < seq_len; ++query_pos) {
+      for (int key_pos = 0; key_pos < seq_len; ++key_pos) {
+        float dot = 0.0f;
+        for (int d = 0; d < head_dim; ++d) {
+          dot += q(query_pos, q_offset + d) * k(key_pos, kv_offset + d);
+        }
+        scores(query_pos, key_pos) = dot * scale_factor;
+      }
+    }
+
+    // prevent token i from attending to future token j > i
+    causal_mask(scores);
+    softmax(scores);
+
+    for (int query_pos = 0; query_pos < seq_len; ++query_pos) {
+      for (int d = 0; d < head_dim; ++d) {
+        float weighted_sum = 0.0f;
+        for (int key_pos = 0; key_pos < seq_len; ++key_pos) {
+          weighted_sum += scores(query_pos, key_pos) * v(key_pos, kv_offset + d);
+        }
+        OUT(query_pos, q_offset + d) = weighted_sum;
+      }
+    }
+  }
 }
 
 void SelfAttention::apply_rope(Tensor& x, int start_pos, float theta) const {

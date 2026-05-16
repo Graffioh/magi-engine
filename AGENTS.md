@@ -26,6 +26,8 @@ MLPs, tokenization, weight loading, and the autoregressive generation loop.
 
 - `CMakeLists.txt`: build configuration for the `magi_engine` executable.
 - `README.md`: user-facing build and run notes.
+- `docs/`: learning notes that explain inference blocks with formulas.
+- `docs/blocks/`: one Markdown note per important implementation concept.
 - `src/tensor.h`: basic tensor storage and indexing.
 - `src/ops.*`: low-level tensor/math operations such as matmul, softmax, RMSNorm.
 - `src/layers.*`: transformer building blocks.
@@ -65,6 +67,25 @@ When explaining AI theory topics, include paper references or similar primary
 sources when possible. Prefer concise citations that help the reader connect the
 implementation to the underlying idea, such as the original Transformer paper,
 RoPE, RMSNorm, LLaMA/TinyLlama, or grouped-query attention papers.
+
+## Learning Notes
+
+- Keep `docs/blocks/` in sync with the code as the engine grows.
+- When implementing a new inference concept, add or update the corresponding
+  Markdown note with the key shapes, formulas, and a short explanation.
+- Include small C++ snippets from the real implementation so readers can connect
+  the formulas back to the code.
+- Keep each snippet local to the subsection's concept. For example, a
+  projection section should show the projection helper and its Q/K/V call sites,
+  not the entire attention forward pass.
+- If a snippet calls a helper that hides the relevant math, also show the helper
+  implementation or replace the snippet with the lower-level code.
+- Avoid isolated constructor details unless initialization or shape setup is the
+  concept being explained.
+- When changing behavior in an existing block, update its note in the same
+  change so the educational docs do not drift from the implementation.
+- Prefer one focused note per concept, such as attention, RoPE, Gated MLP,
+  tensor storage, normalization, tokenization, KV cache, or sampling.
 
 ## Inference Engine Priorities
 
