@@ -4,10 +4,7 @@
 
 // out = input^T
 Tensor transpose(const Tensor& input) {
-    Tensor output;
-    output.rows = input.cols;
-    output.cols = input.rows;
-    output.data.resize(output.rows * output.cols);
+    Tensor output(input.cols, input.rows);
 
     for (int i = 0; i < input.rows; ++i) {
         for (int j = 0; j < input.cols; ++j) {
@@ -23,9 +20,7 @@ void matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     if (A.cols != B.rows) {
         throw std::invalid_argument("Incompatible dimensions for matrix multiplication");
     }
-    OUT.rows = A.rows;
-    OUT.cols = B.cols;
-    OUT.data.resize(OUT.rows * OUT.cols, 0.0f);
+    OUT = Tensor(A.rows, B.cols);
 
     for (int i = 0; i < OUT.rows; ++i) {
         for (int j = 0; j < OUT.cols; ++j) {
@@ -44,9 +39,7 @@ void matmul_nt(const Tensor& A, const Tensor& B, Tensor& OUT) {
     if (A.cols != B.cols) {
         throw std::invalid_argument("Incompatible dimensions for matmul_nt (A.cols must equal B.cols)");
     }
-    OUT.rows = A.rows;
-    OUT.cols = B.rows;
-    OUT.data.resize(OUT.rows * OUT.cols, 0.0f);
+    OUT = Tensor(A.rows, B.rows);
 
     for (int i = 0; i < OUT.rows; ++i) {
         for (int j = 0; j < OUT.cols; ++j) {
@@ -64,9 +57,7 @@ void matvec(const Tensor& A, const std::vector<float>& x, Tensor& OUT) {
     if (A.cols != x.size()) {
         throw std::invalid_argument("Incompatible dimensions for matrix-vector multiplication");
     }
-    OUT.rows = A.rows;
-    OUT.cols = 1;
-    OUT.data.resize(OUT.rows, 0.0f);
+    OUT = Tensor(A.rows, 1);
 
     for (int i = 0; i < OUT.rows; ++i) {
         float sum = 0.0f;
@@ -82,9 +73,7 @@ void add(const Tensor& A, const Tensor& B, Tensor& OUT) {
     if (A.rows != B.rows || A.cols != B.cols) {
         throw std::invalid_argument("Incompatible dimensions for matrix addition");
     }
-    OUT.rows = A.rows;
-    OUT.cols = A.cols;
-    OUT.data.resize(OUT.rows * OUT.cols);
+    OUT = Tensor(A.rows, A.cols);
 
     for (int i = 0; i < OUT.rows; ++i) {
         for (int j = 0; j < OUT.cols; ++j) {
@@ -98,9 +87,7 @@ void mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     if (A.rows != B.rows || A.cols != B.cols) {
         throw std::invalid_argument("Incompatible dimensions for element-wise multiplication");
     }
-    OUT.rows = A.rows;
-    OUT.cols = A.cols;
-    OUT.data.resize(OUT.rows * OUT.cols);
+    OUT = Tensor(A.rows, A.cols);
 
     for (int i = 0; i < OUT.rows; ++i) {
         for (int j = 0; j < OUT.cols; ++j) {

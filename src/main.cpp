@@ -6,10 +6,7 @@
 namespace {
 
 Tensor make_tensor(int rows, int cols) {
-  Tensor tensor;
-  tensor.rows = rows;
-  tensor.cols = cols;
-  tensor.data.resize(rows * cols);
+  Tensor tensor(rows, cols);
 
   for (int i = 0; i < rows * cols; ++i) {
     tensor.data[i] = static_cast<float>((i % 17) - 8) / 17.0f;

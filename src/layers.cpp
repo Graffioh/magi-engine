@@ -2,11 +2,8 @@
 
 #include "ops.h"
 
-LinearLayer::LinearLayer(int input_dim, int output_dim, bool use_bias) {
-  W.rows = output_dim;
-  W.cols = input_dim;
-  W.data.resize(output_dim * input_dim, 0.0f);
-
+LinearLayer::LinearLayer(int input_dim, int output_dim, bool use_bias)
+: W(output_dim, input_dim) {
   bias.resize(use_bias ? output_dim : 0, 0.0f);
 }
 
