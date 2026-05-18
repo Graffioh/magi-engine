@@ -10,6 +10,7 @@ add_executable(magi_engine
   src/main.cpp
   src/layers.cpp
   src/ops.cpp
+  src/tensor.cpp
 )
 
 target_compile_options(magi_engine PRIVATE

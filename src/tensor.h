@@ -2,20 +2,21 @@
 
 #include <vector>
 
-struct Tensor {
+class Tensor {
     std::vector<float> data;
-    int rows;
-    int cols;
-    
-    Tensor(int rows = 0, int cols = 0) : rows(rows), cols(cols) {
-        data.resize(rows * cols, 0.0f);
-    }
+    std::vector<int> shape;
+    std::vector<int> strides;
 
-    float& operator()(int r, int c) {
-        return data[r * cols + c];
-    }
+public:
+    Tensor(std::vector<int> shape);
 
-    const float& operator()(int r, int c) const {
-        return data[r * cols + c];
-    }
+    float operator()(int i) const;
+    float operator()(int i, int j) const;
+    float operator()(int i, int j, int k) const;
+    void write(int i, float value);
+    void write(int i, int j, float value);
+    void write(int i, int j, int k, float value);
+
+    const std::vector<int>& get_shape() const { return shape; }
+    const std::vector<int>& get_strides() const { return strides; }
 };
