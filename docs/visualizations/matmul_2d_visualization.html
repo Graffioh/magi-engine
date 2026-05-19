@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>matmul_2d — step-by-step visualization</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d2230;
+    --border: #2a3142;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --accent: #7cc4ff;
+    --accent-2: #f0a35a;
+    --good: #74d99f;
+    --bad: #ff7676;
+    --highlight-a: rgba(124, 196, 255, 0.35);
+    --highlight-b: rgba(240, 163, 90, 0.35);
+    --highlight-out: rgba(116, 217, 159, 0.45);
+    --pulse: rgba(255, 255, 255, 0.18);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  header {
+    padding: 28px 40px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.2px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  main { padding: 24px 40px 60px; max-width: 1180px; margin: 0 auto; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input[type="number"] {
+    width: 80px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: ui-monospace, monospace;
+  }
+  .field input[type="number"]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  button {
+    background: var(--accent);
+    color: #0b1320;
+    font-weight: 600;
+    border: 0;
+    padding: 9px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .status {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+  }
+  .status.error { color: var(--bad); border-color: rgba(255, 118, 118, 0.4); background: rgba(255, 118, 118, 0.08); }
+  .status.good { color: var(--good); }
+
+  .matrices {
+    display: grid;
+    grid-template-columns: auto auto auto auto auto;
+    gap: 18px;
+    align-items: center;
+    justify-content: start;
+  }
+  .matrix-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px 12px;
+  }
+  .matrix-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; font-family: ui-monospace, monospace; }
+  .matrix-label strong { color: var(--text); }
+  table.matrix { border-collapse: separate; border-spacing: 4px; }
+  table.matrix td {
+    width: 56px; height: 44px;
+    text-align: center;
+    border-radius: 5px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    position: relative;
+    transition: background 120ms ease, transform 120ms ease;
+  }
+  table.matrix td .v { font-size: 13px; }
+  table.matrix td .idx { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
+  table.matrix td.hi-a { background: var(--highlight-a); border-color: var(--accent); }
+  table.matrix td.hi-b { background: var(--highlight-b); border-color: var(--accent-2); }
+  table.matrix td.hi-out { background: var(--highlight-out); border-color: var(--good); }
+  table.matrix td.pulse { animation: pulse 0.32s ease; }
+  @keyframes pulse {
+    0% { background: var(--pulse); }
+    100% { /* falls back to .hi-* */ }
+  }
+  .op { font-size: 30px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+  .step-panel {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .step-text { font-family: ui-monospace, monospace; font-size: 13px; }
+  .step-text .k { color: var(--accent-2); }
+  .step-text .v { color: var(--good); }
+  .step-text .acc { color: var(--accent); }
+  .step-controls { display: flex; gap: 8px; }
+  .progress {
+    height: 4px;
+    background: var(--panel-2);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+  .progress > div {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 160ms ease;
+  }
+
+  pre.code {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    color: var(--text);
+    overflow-x: auto;
+    margin: 0;
+  }
+  pre.code .kw { color: #c099ff; }
+  pre.code .ty { color: #8ed1ff; }
+  pre.code .num { color: #f0a35a; }
+  pre.code .c { color: var(--muted); font-style: italic; }
+  pre.code .hl-i { background: rgba(124,196,255,0.18); border-radius: 3px; padding: 0 2px; }
+  pre.code .hl-j { background: rgba(240,163,90,0.18); border-radius: 3px; padding: 0 2px; }
+  pre.code .hl-k { background: rgba(116,217,159,0.18); border-radius: 3px; padding: 0 2px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); }
+  .sw.a { background: var(--highlight-a); }
+  .sw.b { background: var(--highlight-b); }
+  .sw.o { background: var(--highlight-out); }
+
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>matmul_2d — step-by-step visualization</h1>
+  <p>Walk through the inner kernel one MAC at a time. Change <code>M, K, N</code> to explore. Row-major layout.</p>
+</header>
+
+<main>
+  <section>
+    <h2>controls</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="M">M (rows of A / OUT)</label>
+        <input type="number" id="M" value="3" min="1" max="8" />
+      </div>
+      <div class="field">
+        <label for="K">K (cols of A = rows of B)</label>
+        <input type="number" id="K" value="4" min="1" max="8" />
+      </div>
+      <div class="field">
+        <label for="N">N (cols of B / OUT)</label>
+        <input type="number" id="N" value="2" min="1" max="8" />
+      </div>
+      <div class="field">
+        <label for="aShapeK">A inner dim (override)</label>
+        <input type="number" id="aShapeK" value="4" min="1" max="8" />
+      </div>
+      <div class="field">
+        <label for="bShapeK">B inner dim (override)</label>
+        <input type="number" id="bShapeK" value="4" min="1" max="8" />
+      </div>
+      <button id="reset" class="ghost">randomize values</button>
+      <div id="status" class="status">enter shapes above</div>
+    </div>
+    <p class="footnote">
+      The two "inner dim" overrides let you simulate a shape mismatch: set them differently to see the kernel refuse to run.
+      For a valid matmul both must equal <code>K</code>.
+    </p>
+  </section>
+
+  <section>
+    <h2>matrices</h2>
+    <div class="matrices">
+      <div class="matrix-wrap">
+        <div class="matrix-label">A — shape (<strong id="lblM1">M</strong>, <strong id="lblK1">K</strong>)</div>
+        <table class="matrix" id="matA"></table>
+      </div>
+      <div class="op">×</div>
+      <div class="matrix-wrap">
+        <div class="matrix-label">B — shape (<strong id="lblK2">K</strong>, <strong id="lblN1">N</strong>)</div>
+        <table class="matrix" id="matB"></table>
+      </div>
+      <div class="op">=</div>
+      <div class="matrix-wrap">
+        <div class="matrix-label">OUT — shape (<strong id="lblM2">M</strong>, <strong id="lblN2">N</strong>)</div>
+        <table class="matrix" id="matOut"></table>
+      </div>
+    </div>
+    <div class="legend" style="margin-top:14px">
+      <span class="chip"><span class="sw a"></span> A row being read</span>
+      <span class="chip"><span class="sw b"></span> B column being read</span>
+      <span class="chip"><span class="sw o"></span> OUT cell being written</span>
+      <span class="chip">each cell shows <code>value</code> on top, <code>flat_index</code> below</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>step</h2>
+    <div class="step-panel">
+      <div>
+        <div class="step-text" id="stepText">Press <em>start</em> to walk the kernel.</div>
+        <div class="progress"><div id="progressBar"></div></div>
+      </div>
+      <div class="step-controls">
+        <button id="prev" class="ghost">‹ prev</button>
+        <button id="play">play</button>
+        <button id="next">next ›</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>kernel code</h2>
+<pre class="code"><span class="kw">void</span> Operations::matmul_2d(<span class="kw">const</span> <span class="ty">float</span>* A_data, <span class="kw">const</span> <span class="ty">float</span>* B_data, <span class="ty">float</span>* OUT_data, <span class="ty">int</span> M, <span class="ty">int</span> K, <span class="ty">int</span> N) {
+    <span class="kw">for</span> (<span class="ty">int</span> <span class="hl-i">i</span> = <span class="num">0</span>; <span class="hl-i">i</span> &lt; M; ++<span class="hl-i">i</span>) {
+        <span class="kw">for</span> (<span class="ty">int</span> <span class="hl-j">j</span> = <span class="num">0</span>; <span class="hl-j">j</span> &lt; N; ++<span class="hl-j">j</span>) {
+            <span class="ty">float</span> sum = <span class="num">0</span>;
+            <span class="kw">for</span> (<span class="ty">int</span> <span class="hl-k">k</span> = <span class="num">0</span>; <span class="hl-k">k</span> &lt; K; ++<span class="hl-k">k</span>) {
+                sum += A_data[<span class="hl-i">i</span> * K + <span class="hl-k">k</span>] * B_data[<span class="hl-k">k</span> * N + <span class="hl-j">j</span>];
+            }
+            OUT_data[<span class="hl-i">i</span> * N + <span class="hl-j">j</span>] = sum;
+        }
+    }
+}</pre>
+    <p class="footnote">
+      Flat index for a row-major matrix of shape <code>(rows, cols)</code> at position <code>(r, c)</code> is <code>r * cols + c</code>.
+      That's the entire "trick" behind every index calculation in the kernel.
+    </p>
+  </section>
+</main>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  const inputs = {
+    M: $('M'), K: $('K'), N: $('N'),
+    aK: $('aShapeK'), bK: $('bShapeK'),
+  };
+  const labels = {
+    M1: $('lblM1'), M2: $('lblM2'),
+    K1: $('lblK1'), K2: $('lblK2'),
+    N1: $('lblN1'), N2: $('lblN2'),
+  };
+  const statusEl = $('status');
+  const stepText = $('stepText');
+  const progressBar = $('progressBar');
+  const playBtn = $('play');
+
+  let A = [], B = [], OUT = [];
+  let M = 3, K = 4, N = 2;
+  let steps = [];     // sequence of {i, j, k, phase, sum}
+  let stepIdx = -1;
+  let playing = false;
+  let playTimer = null;
+  let valid = true;
+
+  function randVal() {
+    // small integers so the math is readable
+    return Math.floor(Math.random() * 9) - 4;
+  }
+
+  function buildMatrices() {
+    A = [];
+    for (let i = 0; i < M; i++) {
+      const row = [];
+      for (let k = 0; k < K; k++) row.push(randVal());
+      A.push(row);
+    }
+    B = [];
+    for (let k = 0; k < K; k++) {
+      const row = [];
+      for (let j = 0; j < N; j++) row.push(randVal());
+      B.push(row);
+    }
+    OUT = [];
+    for (let i = 0; i < M; i++) {
+      const row = [];
+      for (let j = 0; j < N; j++) row.push(null);
+      OUT.push(row);
+    }
+  }
+
+  function renderMatrix(el, data, rows, cols, flatStride) {
+    el.innerHTML = '';
+    for (let r = 0; r < rows; r++) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < cols; c++) {
+        const td = document.createElement('td');
+        td.dataset.r = r; td.dataset.c = c;
+        const v = data[r] && data[r][c];
+        const flat = r * flatStride + c;
+        const vText = v === null || v === undefined ? '·' : v;
+        td.innerHTML = `<span class="v">${vText}</span><span class="idx">[${flat}]</span>`;
+        tr.appendChild(td);
+      }
+      el.appendChild(tr);
+    }
+  }
+
+  function renderAll() {
+    renderMatrix($('matA'), A, M, K, K);
+    renderMatrix($('matB'), B, K, N, N);
+    renderMatrix($('matOut'), OUT, M, N, N);
+    labels.M1.textContent = M; labels.M2.textContent = M;
+    labels.K1.textContent = K; labels.K2.textContent = K;
+    labels.N1.textContent = N; labels.N2.textContent = N;
+  }
+
+  function clearHighlights() {
+    document.querySelectorAll('table.matrix td').forEach(td => {
+      td.classList.remove('hi-a', 'hi-b', 'hi-out', 'pulse');
+    });
+  }
+
+  function highlight(matId, r, c, cls) {
+    const cell = document.querySelector(`#${matId} td[data-r="${r}"][data-c="${c}"]`);
+    if (cell) {
+      cell.classList.add(cls, 'pulse');
+    }
+  }
+
+  function buildSteps() {
+    steps = [];
+    for (let i = 0; i < M; i++) {
+      for (let j = 0; j < N; j++) {
+        let sum = 0;
+        const terms = [];
+        for (let k = 0; k < K; k++) {
+          const a = A[i][k];
+          const b = B[k][j];
+          sum += a * b;
+          terms.push({ a, b, k, partial: sum });
+          steps.push({ phase: 'mac', i, j, k, a, b, partial: sum });
+        }
+        steps.push({ phase: 'write', i, j, sum, terms });
+      }
+    }
+  }
+
+  function validateShapes() {
+    M = parseInt(inputs.M.value, 10);
+    K = parseInt(inputs.K.value, 10);
+    N = parseInt(inputs.N.value, 10);
+    const aK = parseInt(inputs.aK.value, 10);
+    const bK = parseInt(inputs.bK.value, 10);
+
+    if ([M, K, N, aK, bK].some(v => !Number.isFinite(v) || v < 1)) {
+      valid = false;
+      statusEl.className = 'status error';
+      statusEl.textContent = 'shapes must be positive integers (1+)';
+      return false;
+    }
+    if ([M, K, N, aK, bK].some(v => v > 8)) {
+      valid = false;
+      statusEl.className = 'status error';
+      statusEl.textContent = 'cap is 8 per dim — keep it readable';
+      return false;
+    }
+    if (aK !== K || bK !== K) {
+      valid = false;
+      statusEl.className = 'status error';
+      statusEl.textContent = `shape mismatch: A.cols=${aK}, B.rows=${bK} — must both equal K=${K}. matmul refused.`;
+      return false;
+    }
+    valid = true;
+    statusEl.className = 'status good';
+    statusEl.textContent = `valid: (M=${M}, K=${K}) × (K=${K}, N=${N}) → (M=${M}, N=${N})  |  ${M*N*K} MACs total`;
+    return true;
+  }
+
+  function rebuildAll() {
+    if (!validateShapes()) {
+      // still render whatever we can with current valid values, but disable stepping
+      A = []; B = []; OUT = [];
+      document.querySelectorAll('table.matrix').forEach(t => t.innerHTML = '');
+      stepText.innerHTML = '<span style="color:var(--bad)">Fix the shape mismatch above to run the kernel.</span>';
+      progressBar.style.width = '0%';
+      stopPlay();
+      return;
+    }
+    buildMatrices();
+    buildSteps();
+    stepIdx = -1;
+    renderAll();
+    clearHighlights();
+    stepText.innerHTML = 'Press <em>next</em> or <em>play</em> to begin.';
+    progressBar.style.width = '0%';
+  }
+
+  function applyStep(idx) {
+    if (idx < 0 || idx >= steps.length) return;
+    const s = steps[idx];
+    clearHighlights();
+    if (s.phase === 'mac') {
+      // highlight A[i,k], B[k,j], OUT[i,j]
+      highlight('matA', s.i, s.k, 'hi-a');
+      highlight('matB', s.k, s.j, 'hi-b');
+      highlight('matOut', s.i, s.j, 'hi-out');
+      stepText.innerHTML =
+        `i=<span class="k">${s.i}</span>, j=<span class="k">${s.j}</span>, k=<span class="k">${s.k}</span> &nbsp;|&nbsp; ` +
+        `sum += A[${s.i}*${K}+${s.k}] * B[${s.k}*${N}+${s.j}] = ` +
+        `<span class="v">(${s.a})</span> * <span class="v">(${s.b})</span> = ` +
+        `<span class="v">${s.a*s.b}</span> &nbsp;→&nbsp; partial sum = <span class="acc">${s.partial}</span>`;
+    } else if (s.phase === 'write') {
+      OUT[s.i][s.j] = s.sum;
+      renderMatrix($('matOut'), OUT, M, N, N);
+      highlight('matOut', s.i, s.j, 'hi-out');
+      stepText.innerHTML =
+        `write: OUT[${s.i}*${N}+${s.j}] = <span class="v">${s.sum}</span> &nbsp;(cell (${s.i},${s.j}) done)`;
+    }
+    progressBar.style.width = `${((idx+1)/steps.length)*100}%`;
+  }
+
+  function next() {
+    if (!valid || !steps.length) return;
+    if (stepIdx >= steps.length - 1) { stopPlay(); return; }
+    stepIdx++;
+    applyStep(stepIdx);
+  }
+  function prev() {
+    if (!valid || !steps.length) return;
+    if (stepIdx <= 0) return;
+    // rewind: rebuild OUT from scratch up to stepIdx-1
+    stepIdx--;
+    for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) OUT[i][j] = null;
+    renderMatrix($('matOut'), OUT, M, N, N);
+    for (let s = 0; s <= stepIdx; s++) {
+      if (steps[s].phase === 'write') OUT[steps[s].i][steps[s].j] = steps[s].sum;
+    }
+    renderMatrix($('matOut'), OUT, M, N, N);
+    applyStep(stepIdx);
+  }
+
+  function startPlay() {
+    if (!valid || !steps.length) return;
+    playing = true;
+    playBtn.textContent = 'pause';
+    playTimer = setInterval(() => {
+      if (stepIdx >= steps.length - 1) { stopPlay(); return; }
+      next();
+    }, 420);
+  }
+  function stopPlay() {
+    playing = false;
+    playBtn.textContent = 'play';
+    if (playTimer) clearInterval(playTimer);
+    playTimer = null;
+  }
+
+  // wire inputs
+  Object.values(inputs).forEach(inp => {
+    inp.addEventListener('input', () => {
+      // keep A/B inner-dim overrides in sync with K when K changes (only if they were equal)
+      if (inp === inputs.K) {
+        inputs.aK.value = inputs.K.value;
+        inputs.bK.value = inputs.K.value;
+      }
+      rebuildAll();
+    });
+  });
+  $('reset').addEventListener('click', rebuildAll);
+  $('next').addEventListener('click', () => { stopPlay(); next(); });
+  $('prev').addEventListener('click', () => { stopPlay(); prev(); });
+  playBtn.addEventListener('click', () => {
+    if (playing) stopPlay(); else startPlay();
+  });
+
+  rebuildAll();
+})();
+</script>
+</body>
+</html>

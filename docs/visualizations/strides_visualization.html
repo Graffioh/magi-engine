@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>strides — visualization</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #141823;
+    --panel-2: #1c2130;
+    --border: #2a3142;
+    --border-soft: #232a3a;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --dim: #5c6478;
+    --accent: #7cc4ff;
+    --accent-2: #f0a35a;
+    --good: #74d99f;
+    --bad: #ff7676;
+    --c0: #7cc4ff;
+    --c1: #f0a35a;
+    --c2: #74d99f;
+    --c3: #c099ff;
+    --c4: #ff7eb6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(124,196,255,0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(240,163,90,0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  header { padding: 28px 40px 8px; border-bottom: 1px solid var(--border-soft); }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.2px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; max-width: 760px; }
+  main { padding: 24px 40px 80px; max-width: 1260px; margin: 0 auto; }
+  section { margin-bottom: 26px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 1.6px;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+
+  /* shape input row */
+  .topbar {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  }
+  .topbar label {
+    font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .topbar input[type="text"] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font-family: ui-monospace, monospace;
+    min-width: 200px; font-size: 14px;
+  }
+  .topbar input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .topbar .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .preset {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border-soft); border-radius: 999px;
+    padding: 5px 11px; font-family: ui-monospace, monospace; font-size: 12px;
+    cursor: pointer; transition: all 120ms ease;
+  }
+  .preset:hover { border-color: var(--accent); color: var(--accent); }
+  .preset.active { background: rgba(124,196,255,0.15); border-color: var(--accent); color: var(--accent); }
+  .status {
+    font-family: ui-monospace, monospace; font-size: 13px;
+    padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border-soft); background: var(--panel-2); color: var(--muted);
+    margin-left: auto;
+  }
+  .status.error { color: var(--bad); border-color: rgba(255, 118, 118, 0.4); background: rgba(255, 118, 118, 0.08); }
+  .status.good  { color: var(--good); border-color: rgba(116,217,159,0.25); }
+
+  /* nested box visualization */
+  .nested-wrap { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .nested-box {
+    position: relative;
+    display: inline-flex;
+    border: 1px solid;
+    border-radius: 10px;
+    padding: 10px;
+    gap: 8px;
+    background: transparent;
+    transition: box-shadow 160ms ease, border-color 160ms ease;
+  }
+  .nested-box.axis-focus { box-shadow: 0 0 0 2px currentColor; }
+  .nested-box .axis-tag {
+    position: absolute; top: -10px; left: 10px;
+    background: var(--bg); padding: 0 6px;
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: inherit; letter-spacing: 0.6px;
+  }
+  .nested-box .stride-tag {
+    position: absolute; top: -10px; right: 10px;
+    background: var(--bg); padding: 0 6px;
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--muted);
+  }
+  .nested-box.row { flex-direction: row; }
+  .nested-box.col { flex-direction: column; }
+
+  .leaf {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    padding: 7px 6px 6px;
+    min-width: 60px;
+    text-align: center;
+    font-family: ui-monospace, monospace;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .leaf:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .leaf .multi { font-size: 12px; color: var(--text); display: block; }
+  .leaf .flat  { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
+  .leaf.selected {
+    background: rgba(124,196,255,0.15);
+    border-color: var(--accent);
+  }
+  .leaf.neighbor-0 { outline: 2px solid var(--c0); outline-offset: 1px; }
+  .leaf.neighbor-1 { outline: 2px solid var(--c1); outline-offset: 1px; }
+  .leaf.neighbor-2 { outline: 2px solid var(--c2); outline-offset: 1px; }
+  .leaf.neighbor-3 { outline: 2px solid var(--c3); outline-offset: 1px; }
+  .leaf.neighbor-4 { outline: 2px solid var(--c4); outline-offset: 1px; }
+
+  /* flat strip with arc-arrows */
+  .strip-wrap { position: relative; padding-top: 70px; padding-bottom: 4px; overflow-x: auto; }
+  .strip { display: flex; gap: 4px; position: relative; }
+  .strip .leaf { min-width: 50px; }
+  .arcs {
+    position: absolute; top: 0; left: 0; right: 0; height: 64px;
+    pointer-events: none;
+  }
+
+  /* stride build-up */
+  .stride-builder { display: flex; flex-direction: column; gap: 10px; }
+  .stride-row {
+    display: grid;
+    grid-template-columns: 90px 110px 1fr;
+    gap: 14px; align-items: center;
+    padding: 10px 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    font-family: ui-monospace, monospace; font-size: 13px;
+    transition: border-color 160ms ease, background 160ms ease;
+  }
+  .stride-row.active { border-color: var(--accent); background: rgba(124,196,255,0.06); }
+  .stride-row.pending { opacity: 0.45; }
+  .stride-row .axis-pill {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+    color: #0b1320;
+  }
+  .stride-row .stride-val {
+    color: var(--good); font-weight: 700;
+  }
+  .stride-row .stride-val.unknown { color: var(--dim); }
+  .stride-row .bar-wrap { display: flex; align-items: center; gap: 10px; }
+  .stride-row .bar {
+    height: 10px; border-radius: 999px; background: var(--panel);
+    overflow: hidden; flex: 1; position: relative;
+    border: 1px solid var(--border-soft);
+  }
+  .stride-row .bar > div {
+    height: 100%; background: linear-gradient(90deg, var(--c0), var(--c2));
+    transition: width 220ms ease;
+  }
+  .stride-row .bar-text { color: var(--muted); font-size: 12px; min-width: 100px; }
+
+  .step-panel {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 16px; align-items: center;
+    margin-top: 14px;
+  }
+  .step-text {
+    font-family: ui-monospace, monospace; font-size: 13px;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    color: var(--text);
+  }
+  .step-text .k { color: var(--accent-2); font-weight: 700; }
+  .step-text .v { color: var(--good); font-weight: 700; }
+  .step-text .acc { color: var(--accent); font-weight: 700; }
+  .step-controls { display: flex; gap: 8px; }
+  button.btn {
+    background: var(--accent); color: #0b1320; font-weight: 700;
+    border: 0; padding: 9px 16px; border-radius: 7px; cursor: pointer; font-size: 13px;
+    transition: transform 100ms ease, opacity 100ms ease;
+  }
+  button.btn:hover { transform: translateY(-1px); }
+  button.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  button.btn.ghost {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+
+  /* indexer */
+  .indexer { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .indexer .field label { font-size: 11px; color: var(--muted); display:block; margin-bottom:4px; text-transform: uppercase; letter-spacing: 1px; }
+  .indexer input {
+    width: 80px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; font-family: ui-monospace, monospace;
+  }
+  .indexer .result {
+    font-family: ui-monospace, monospace; font-size: 13px;
+    margin-left: 10px; padding: 8px 12px;
+    border-radius: 8px; background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+  }
+  .indexer .result .num { color: var(--good); font-weight: 700; }
+
+  pre.code {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; font-family: ui-monospace, monospace; font-size: 13px;
+    overflow-x: auto; margin: 0;
+  }
+  pre.code .kw { color: #c099ff; }
+  pre.code .ty { color: #8ed1ff; }
+  pre.code .num { color: #f0a35a; }
+  pre.code .c { color: var(--muted); font-style: italic; }
+  pre.code .bad { background: rgba(255,118,118,0.18); border-radius: 3px; padding: 0 3px; color: var(--bad); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .legend .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 4px; border-radius: 999px; }
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  /* color helpers (used inline) */
+  .c-0 { color: var(--c0); } .bg-0 { background: var(--c0); }
+  .c-1 { color: var(--c1); } .bg-1 { background: var(--c1); }
+  .c-2 { color: var(--c2); } .bg-2 { background: var(--c2); }
+  .c-3 { color: var(--c3); } .bg-3 { background: var(--c3); }
+  .c-4 { color: var(--c4); } .bg-4 { background: var(--c4); }
+  .bd-0 { border-color: var(--c0); } .bd-1 { border-color: var(--c1); }
+  .bd-2 { border-color: var(--c2); } .bd-3 { border-color: var(--c3); }
+  .bd-4 { border-color: var(--c4); }
+
+  .grid-2 {
+    display: grid; gap: 22px;
+    grid-template-columns: 1fr 1fr;
+  }
+  @media (max-width: 920px) { .grid-2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>strides — visualizing the jump-size</h1>
+  <p>
+    A stride is "how many flat-memory slots I leap when I bump one index by 1." Pick a shape and an axis.
+    The nested boxes show the recursive structure; the strip below shows the actual jumps in flat memory; the builder shows the right-to-left computation.
+  </p>
+</header>
+
+<main>
+  <section>
+    <div class="panel topbar">
+      <div>
+        <label for="shape">shape</label>
+        <input type="text" id="shape" value="2,3,4" />
+      </div>
+      <div>
+        <label>presets</label>
+        <div class="presets" id="presets">
+          <button class="preset" data-s="4">1D (4)</button>
+          <button class="preset" data-s="3,4">2D (3,4)</button>
+          <button class="preset active" data-s="2,3,4">3D (2,3,4)</button>
+          <button class="preset" data-s="2,2,2,3">4D (2,2,2,3)</button>
+        </div>
+      </div>
+      <div id="status" class="status">enter a shape above</div>
+    </div>
+  </section>
+
+  <section class="grid-2">
+    <div>
+      <h2>focus an axis</h2>
+      <div class="panel" id="axisFocusPanel">
+        <div id="axisButtons" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+        <div class="footnote" style="margin-top:10px">
+          Click an axis to highlight it everywhere. Click any cell to mark it as "current" and see where bumping each axis by 1 lands you.
+        </div>
+      </div>
+    </div>
+    <div>
+      <h2>summary</h2>
+      <div class="panel" id="summary" style="font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.8;">
+        —
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>nested structure — strides come from the geometry</h2>
+    <div class="panel">
+      <div class="nested-wrap" id="nested"></div>
+      <p class="footnote">
+        Each outer box holds <em>one full sub-tensor</em>. The size of a sub-tensor (in elements) is the stride of the axis that selects it.
+        That's why the formula is <code>strides[i] = strides[i+1] × shape[i+1]</code> — each step out adds another layer of "how many cells are inside me."
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>flat memory — see the jumps</h2>
+    <div class="panel">
+      <div class="strip-wrap">
+        <svg class="arcs" id="arcs"></svg>
+        <div class="strip" id="strip"></div>
+      </div>
+      <div class="legend" id="arcsLegend"></div>
+      <p class="footnote">
+        Arcs show "<code>+1 along axis k</code>" jumps starting from the selected cell. The length of each arc <em>is</em> the stride of that axis.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>strides — built right to left</h2>
+    <div class="panel">
+      <div class="stride-builder" id="builder"></div>
+      <div class="step-panel">
+        <div class="step-text" id="stepText">Press <em>next</em> to step through the loop.</div>
+        <div class="step-controls">
+          <button id="prev" class="btn ghost">‹ prev</button>
+          <button id="play" class="btn">play</button>
+          <button id="next" class="btn">next ›</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>multi-index → flat offset</h2>
+    <div class="panel">
+      <div class="indexer" id="indexer"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>the code</h2>
+    <div class="panel" style="padding: 0; background: transparent; border: 0;">
+<pre class="code"><span class="c">// shape.size() == n. strides also has size n.</span>
+strides.resize(shape.size(), <span class="num">1</span>);                <span class="c">// every stride starts at 1</span>
+<span class="kw">for</span> (<span class="ty">int</span> i = (<span class="ty">int</span>)strides.size() - <span class="num">2</span>; i &gt;= <span class="num">0</span>; --i) {
+    strides[i] = strides[i + <span class="num">1</span>] * shape[i + <span class="num">1</span>];
+}</pre>
+      <p class="footnote">
+        ⚠️ A <span class="bad">size_t</span> loop with <code>i &gt;= 0</code> is an infinite loop — unsigned types never go below zero. Use signed <code>int</code> or the <code>i--&gt;0</code> trick.
+      </p>
+    </div>
+  </section>
+</main>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  const stripEl = $('strip');
+  const arcsEl = $('arcs');
+  const nestedEl = $('nested');
+  const builderEl = $('builder');
+  const axisButtonsEl = $('axisButtons');
+  const indexerEl = $('indexer');
+  const statusEl = $('status');
+  const stepText = $('stepText');
+  const summaryEl = $('summary');
+  const shapeInput = $('shape');
+
+  const COLORS = ['var(--c0)','var(--c1)','var(--c2)','var(--c3)','var(--c4)'];
+  const COLOR_HEX = ['#7cc4ff','#f0a35a','#74d99f','#c099ff','#ff7eb6'];
+
+  let shape = [];
+  let strides = [];
+  let n = 0;
+  let focusAxis = -1;     // -1 = none
+  let selectedFlat = 0;
+  let stepIdx = 0;
+  let playing = false;
+  let playTimer = null;
+
+  function parseShape(text) {
+    const parts = text.split(/[,\s]+/).filter(Boolean);
+    const nums = parts.map(p => parseInt(p, 10));
+    if (nums.length < 1) return { error: 'enter at least one dim' };
+    if (nums.some(v => !Number.isFinite(v) || v < 1)) return { error: 'each dim must be a positive integer' };
+    if (nums.length > 4) return { error: 'cap is 4 dims (visualization)' };
+    if (nums.some(v => v > 6)) return { error: 'cap is 6 per dim' };
+    const total = nums.reduce((a,b)=>a*b,1);
+    if (total > 48) return { error: `total ${total} > 48 — pick smaller dims` };
+    return { shape: nums };
+  }
+  function computeStrides(s) {
+    const out = new Array(s.length).fill(1);
+    for (let i = s.length - 2; i >= 0; --i) out[i] = out[i+1] * s[i+1];
+    return out;
+  }
+  function multiOf(flat) {
+    const idx = new Array(n).fill(0);
+    let rem = flat;
+    for (let i = 0; i < n; i++) { idx[i] = Math.floor(rem / strides[i]); rem %= strides[i]; }
+    return idx;
+  }
+  function flatOf(idx) { let f = 0; for (let i = 0; i < n; i++) f += idx[i] * strides[i]; return f; }
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  function renderAxisButtons() {
+    axisButtonsEl.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement('button');
+      b.className = 'preset' + (focusAxis === i ? ' active' : '');
+      b.style.borderColor = COLORS[i % 5];
+      if (focusAxis === i) {
+        b.style.background = `${COLOR_HEX[i % 5]}22`;
+        b.style.color = COLOR_HEX[i % 5];
+      }
+      b.innerHTML = `axis ${i} &nbsp;<span style="color:var(--muted)">·</span>&nbsp; stride <b>${strides[i]}</b>`;
+      b.addEventListener('click', () => {
+        focusAxis = (focusAxis === i) ? -1 : i;
+        renderAll();
+      });
+      axisButtonsEl.appendChild(b);
+    }
+    const clear = document.createElement('button');
+    clear.className = 'preset';
+    clear.textContent = 'clear focus';
+    clear.addEventListener('click', () => { focusAxis = -1; renderAll(); });
+    axisButtonsEl.appendChild(clear);
+  }
+
+  function renderSummary() {
+    const shapeStr = shape.join(', ');
+    const stridesStr = strides.join(', ');
+    const total = shape.reduce((a,b)=>a*b,1);
+    summaryEl.innerHTML =
+      `<div>shape   = <b>(${shapeStr})</b></div>` +
+      `<div>strides = <b style="color:var(--good)">(${stridesStr})</b></div>` +
+      `<div>total elements = <b>${total}</b></div>` +
+      (focusAxis >= 0
+        ? `<div style="margin-top:6px; color:${COLOR_HEX[focusAxis%5]}">focus: axis ${focusAxis} → +1 along this axis jumps <b>${strides[focusAxis]}</b> slot${strides[focusAxis]===1?'':'s'} in flat memory</div>`
+        : `<div style="margin-top:6px; color:var(--muted)">no axis focused</div>`);
+  }
+
+  /* ---------- nested boxes ---------- */
+  // recursive: dim is the current axis (0..n-1), prefix is the multi-index above us
+  function buildNested(dim, prefix) {
+    // last axis = horizontal (columns), second-to-last = vertical (rows), then alternate outward
+    const isRow = (n - 1 - dim) % 2 === 0;
+    const box = document.createElement('div');
+    box.className = 'nested-box ' + (isRow ? 'row' : 'col');
+    box.style.color = COLOR_HEX[dim % 5];
+    box.style.borderColor = COLOR_HEX[dim % 5];
+    if (focusAxis === dim) box.classList.add('axis-focus');
+
+    const axisTag = document.createElement('span');
+    axisTag.className = 'axis-tag';
+    axisTag.style.color = COLOR_HEX[dim % 5];
+    axisTag.textContent = `axis ${dim}  (size ${shape[dim]})`;
+    box.appendChild(axisTag);
+
+    const strideTag = document.createElement('span');
+    strideTag.className = 'stride-tag';
+    strideTag.textContent = `stride ${strides[dim]}`;
+    box.appendChild(strideTag);
+
+    for (let i = 0; i < shape[dim]; i++) {
+      const idx = prefix.concat([i]);
+      if (dim === n - 1) {
+        const leaf = makeLeaf(idx);
+        box.appendChild(leaf);
+      } else {
+        box.appendChild(buildNested(dim + 1, idx));
+      }
+    }
+    return box;
+  }
+
+  function makeLeaf(idx) {
+    const flat = flatOf(idx);
+    const el = document.createElement('div');
+    el.className = 'leaf';
+    el.dataset.flat = flat;
+    el.innerHTML = `<span class="multi">(${idx.join(',')})</span><span class="flat">[${flat}]</span>`;
+    if (flat === selectedFlat) el.classList.add('selected');
+    el.addEventListener('click', () => { selectedFlat = flat; renderAll(); });
+    return el;
+  }
+
+  function renderNested() {
+    nestedEl.innerHTML = '';
+    nestedEl.appendChild(buildNested(0, []));
+  }
+
+  /* ---------- flat strip with arcs ---------- */
+  function renderStrip() {
+    stripEl.innerHTML = '';
+    const total = shape.reduce((a,b)=>a*b,1);
+    for (let f = 0; f < total; f++) {
+      const idx = multiOf(f);
+      const el = makeLeaf(idx);
+      el.style.minWidth = '52px';
+      stripEl.appendChild(el);
+    }
+    // draw arcs after layout
+    requestAnimationFrame(drawArcs);
+  }
+
+  function drawArcs() {
+    arcsEl.innerHTML = '';
+    const total = shape.reduce((a,b)=>a*b,1);
+    const stripRect = stripEl.getBoundingClientRect();
+    arcsEl.setAttribute('width', stripRect.width);
+    arcsEl.setAttribute('height', 64);
+    arcsEl.style.width = stripRect.width + 'px';
+
+    const cells = Array.from(stripEl.querySelectorAll('.leaf'));
+    if (!cells.length) return;
+    const cellCenters = cells.map(c => {
+      const r = c.getBoundingClientRect();
+      return r.left + r.width / 2 - stripRect.left;
+    });
+
+    // for each axis, draw an arc from selected to selected + stride (if valid +1 step)
+    const selectedIdx = multiOf(selectedFlat);
+    const axesToDraw = focusAxis >= 0 ? [focusAxis] : Array.from({length: n}, (_, i) => i);
+
+    // legend
+    const legend = $('arcsLegend');
+    legend.innerHTML = '';
+
+    axesToDraw.forEach((ax, idxInList) => {
+      if (selectedIdx[ax] + 1 >= shape[ax]) {
+        // at the edge of this axis — can't +1
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.innerHTML = `<span class="sw" style="background:${COLOR_HEX[ax%5]}"></span> +1 along axis ${ax}: <em style="color:var(--dim);margin-left:4px">(at edge)</em>`;
+        legend.appendChild(chip);
+        return;
+      }
+      const startF = selectedFlat;
+      const endF   = selectedFlat + strides[ax];
+      if (endF >= total) return;
+
+      const x1 = cellCenters[startF];
+      const x2 = cellCenters[endF];
+      const baseY = 56;
+      const peakY = 56 - Math.min(48, 8 + (idxInList + 1) * 10);
+      const midX = (x1 + x2) / 2;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${x1} ${baseY} Q ${midX} ${peakY} ${x2} ${baseY}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', COLOR_HEX[ax % 5]);
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('marker-end', `url(#arrow-${ax})`);
+      arcsEl.appendChild(path);
+
+      // arrow marker (one per axis)
+      const defs = ensureDefs();
+      if (!document.getElementById(`arrow-${ax}`)) {
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', `arrow-${ax}`);
+        marker.setAttribute('viewBox', '0 0 10 10');
+        marker.setAttribute('refX', '8'); marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '6'); marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('orient', 'auto-start-reverse');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+        p.setAttribute('fill', COLOR_HEX[ax % 5]);
+        marker.appendChild(p);
+        defs.appendChild(marker);
+      }
+
+      // label above the arc midpoint
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', midX);
+      txt.setAttribute('y', peakY - 4);
+      txt.setAttribute('fill', COLOR_HEX[ax % 5]);
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('font-family', 'ui-monospace, monospace');
+      txt.setAttribute('font-size', '11');
+      txt.textContent = `+${strides[ax]} (axis ${ax})`;
+      arcsEl.appendChild(txt);
+
+      // mark the destination cell with a colored outline
+      cells[endF].classList.add(`neighbor-${ax % 5}`);
+
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.innerHTML = `<span class="sw" style="background:${COLOR_HEX[ax%5]}"></span> +1 along axis ${ax}: jump <b style="color:${COLOR_HEX[ax%5]}">${strides[ax]}</b> → slot [${endF}]`;
+      legend.appendChild(chip);
+    });
+  }
+  function ensureDefs() {
+    let defs = arcsEl.querySelector('defs');
+    if (!defs) { defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs'); arcsEl.appendChild(defs); }
+    return defs;
+  }
+
+  /* ---------- stride builder ---------- */
+  function renderBuilder() {
+    builderEl.innerHTML = '';
+    // step semantics:
+    // step 0 = "resize: all 1"
+    // step s in 1..n = revealed axis (n-s) (right-to-left)
+    for (let i = 0; i < n; i++) {
+      const sIdx = (n - 1) - i;  // which step reveals axis i
+      const revealed = stepIdx > sIdx;
+      const isActive = (stepIdx - 1) === sIdx;
+      const row = document.createElement('div');
+      row.className = 'stride-row' + (isActive ? ' active' : '') + (revealed ? '' : ' pending');
+
+      const pill = document.createElement('span');
+      pill.className = 'axis-pill';
+      pill.style.background = COLOR_HEX[i % 5];
+      pill.textContent = `axis ${i}`;
+
+      const val = document.createElement('span');
+      const known = revealed || stepIdx === 0 && i === n - 1;
+      // step 0 reveals the resize-to-1 base, including axis (n-1) at 1
+      if (stepIdx === 0) {
+        val.innerHTML = `stride = <span class="stride-val">1</span>`;
+      } else if (revealed) {
+        val.innerHTML = `stride = <span class="stride-val">${strides[i]}</span>`;
+      } else {
+        val.innerHTML = `stride = <span class="stride-val unknown">?</span>`;
+      }
+
+      const bar = document.createElement('div');
+      bar.className = 'bar-wrap';
+      const max = Math.max(...strides);
+      const pct = revealed ? Math.max(4, (strides[i] / max) * 100) : 0;
+      bar.innerHTML = `
+        <div class="bar"><div style="width:${pct}%; background:${COLOR_HEX[i%5]}"></div></div>
+        <div class="bar-text">${revealed
+          ? (i === n - 1 ? 'base case → 1' : `= strides[${i+1}] × shape[${i+1}] = ${strides[i+1]} × ${shape[i+1]}`)
+          : '<span style="opacity:0.5">not yet computed</span>'}</div>
+      `;
+
+      row.appendChild(pill);
+      row.appendChild(val);
+      row.appendChild(bar);
+      builderEl.appendChild(row);
+    }
+
+    if (stepIdx === 0) {
+      stepText.innerHTML = `Initialized with <code>strides.resize(${n}, 1)</code> — every stride starts at 1.`;
+    } else if (stepIdx > n) {
+      stepText.innerHTML = `Done. Final strides: <span class="acc">(${strides.join(', ')})</span>.`;
+    } else {
+      const axisRevealed = n - stepIdx;
+      if (axisRevealed === n - 1) {
+        stepText.innerHTML = `axis <span class="k">${axisRevealed}</span> is the base case: stride = <span class="v">1</span>. (the last axis in row-major always has stride 1.)`;
+      } else {
+        stepText.innerHTML =
+          `axis <span class="k">${axisRevealed}</span>: ` +
+          `strides[${axisRevealed}] = strides[${axisRevealed+1}] × shape[${axisRevealed+1}] = ` +
+          `<span class="v">${strides[axisRevealed+1]}</span> × <span class="v">${shape[axisRevealed+1]}</span> = ` +
+          `<span class="acc">${strides[axisRevealed]}</span> &nbsp;— bumping this axis by 1 leaps <em>${strides[axisRevealed]}</em> flat slots.`;
+      }
+    }
+  }
+
+  /* ---------- indexer ---------- */
+  function renderIndexer() {
+    const prev = Array.from(indexerEl.querySelectorAll('input.idx-input')).map(i => parseInt(i.value, 10));
+    indexerEl.innerHTML = '';
+    const cur = multiOf(selectedFlat);
+    for (let i = 0; i < n; i++) {
+      const f = document.createElement('div'); f.className = 'field';
+      f.innerHTML = `<label>index[${i}] (0..${shape[i]-1})</label>`;
+      const inp = document.createElement('input');
+      inp.className = 'idx-input';
+      inp.type = 'number'; inp.min = '0'; inp.max = String(shape[i]-1);
+      inp.value = String(prev[i] !== undefined && prev[i] < shape[i] ? prev[i] : cur[i]);
+      inp.style.borderColor = COLOR_HEX[i%5];
+      inp.addEventListener('input', updateIndexer);
+      f.appendChild(inp);
+      indexerEl.appendChild(f);
+    }
+    const r = document.createElement('div'); r.className = 'result'; r.id = 'indexerResult';
+    indexerEl.appendChild(r);
+    updateIndexer();
+  }
+  function updateIndexer() {
+    const inputs = Array.from(indexerEl.querySelectorAll('input.idx-input'));
+    const idx = inputs.map(i => parseInt(i.value, 10));
+    const out = $('indexerResult');
+    if (!out) return;
+    if (idx.some((v, k) => !Number.isFinite(v) || v < 0 || v >= shape[k])) {
+      out.innerHTML = '<span style="color:var(--bad)">index out of range</span>';
+      return;
+    }
+    let flat = 0;
+    const parts = [];
+    for (let k = 0; k < n; k++) {
+      flat += idx[k] * strides[k];
+      parts.push(`<span style="color:${COLOR_HEX[k%5]}">${idx[k]}×${strides[k]}</span>`);
+    }
+    out.innerHTML = `flat = ${parts.join(' + ')} = <span class="num">${flat}</span>`;
+  }
+
+  /* ---------- master render ---------- */
+  function renderAll() {
+    renderAxisButtons();
+    renderSummary();
+    renderNested();
+    renderStrip();
+    renderBuilder();
+    renderIndexer();
+  }
+
+  function rebuild() {
+    const p = parseShape(shapeInput.value);
+    if (p.error) {
+      setStatus(p.error, 'error');
+      nestedEl.innerHTML = ''; stripEl.innerHTML = ''; arcsEl.innerHTML = '';
+      builderEl.innerHTML = ''; axisButtonsEl.innerHTML = ''; indexerEl.innerHTML = '';
+      summaryEl.innerHTML = '<span style="color:var(--bad)">invalid shape</span>';
+      stepText.innerHTML = 'fix shape to continue';
+      return;
+    }
+    shape = p.shape;
+    n = shape.length;
+    strides = computeStrides(shape);
+    if (selectedFlat >= shape.reduce((a,b)=>a*b,1)) selectedFlat = 0;
+    if (focusAxis >= n) focusAxis = -1;
+    stepIdx = n + 1; // start in the "done" state so strides are visible
+    setStatus(`shape (${shape.join(', ')}) → strides (${strides.join(', ')}) · total ${shape.reduce((a,b)=>a*b,1)}`, 'good');
+    renderAll();
+    // mark preset active
+    document.querySelectorAll('.preset[data-s]').forEach(b => {
+      b.classList.toggle('active', b.dataset.s === shape.join(','));
+    });
+  }
+
+  function next() { if (stepIdx >= n) { stopPlay(); return; } stepIdx++; renderBuilder(); }
+  function prev() { if (stepIdx <= 0) return; stepIdx--; renderBuilder(); }
+  function startPlay() {
+    if (stepIdx >= n) stepIdx = 0;
+    playing = true; $('play').textContent = 'pause';
+    playTimer = setInterval(() => { if (stepIdx >= n) { stopPlay(); return; } next(); }, 750);
+  }
+  function stopPlay() {
+    playing = false; $('play').textContent = 'play';
+    if (playTimer) clearInterval(playTimer);
+    playTimer = null;
+  }
+
+  shapeInput.addEventListener('input', rebuild);
+  document.querySelectorAll('.preset[data-s]').forEach(b => {
+    b.addEventListener('click', () => { shapeInput.value = b.dataset.s; rebuild(); });
+  });
+  $('next').addEventListener('click', () => { stopPlay(); next(); });
+  $('prev').addEventListener('click', () => { stopPlay(); prev(); });
+  $('play').addEventListener('click', () => { if (playing) stopPlay(); else startPlay(); });
+  window.addEventListener('resize', () => requestAnimationFrame(drawArcs));
+
+  rebuild();
+})();
+</script>
+</body>
+</html>

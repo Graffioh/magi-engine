@@ -16,6 +16,8 @@ public:
     void write(int i, float value);
     void write(int i, int j, float value);
     void write(int i, int j, int k, float value);
+    const float* data_ptr() const { return data.data(); };
+    float* data_ptr() { return data.data(); };
 
     const std::vector<int>& get_shape() const { return shape; }
     const std::vector<int>& get_strides() const { return strides; }
