@@ -13,7 +13,7 @@ RMSNorm, SwiGLU MLP, grouped-query attention).
 
 Scope: storage, math primitives, and a build that runs.
 
-- [ ] `Tensor`: contiguous float storage, shape, strides, indexing helpers.
+- [x] `Tensor`: contiguous float storage, shape, strides, indexing helpers.
 - [ ] Shape validation utilities that throw with useful messages.
 - [ ] `ops`: `matmul`, `matmul_transposed_b`, `rmsnorm`, `softmax`, `silu`,
       elementwise add/mul.
@@ -117,19 +117,6 @@ Scope: make it fast without hiding the math.
 
 Exit criteria: measurable speedup on prefill and decode with unchanged outputs
 (within tolerance) and code that still reads like a teaching implementation.
-
-## Cross-Cutting Tracks
-
-These run alongside every stage:
-
-- **Docs**: each new concept gets a note in `docs/blocks/` with shapes,
-  formulas, and a focused C++ snippet.
-- **Verification**: keep a small Python script that dumps reference activations
-  for a fixed prompt; diff against the C++ run when something feels off.
-- **Numerical hygiene**: prefer fp32 accumulation in matmul/softmax/RMSNorm
-  even if storage moves to lower precision later.
-- **Determinism**: avoid threading nondeterminism in tests; gate parallelism
-  behind a flag until Stage 7.
 
 ## Out Of Scope
 

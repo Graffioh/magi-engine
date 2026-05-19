@@ -11,7 +11,7 @@ Tensor::Tensor(std::vector<int> shape): shape(shape) {
     data.resize(total);
 
     strides.resize(shape.size(), 1);
-    for (int i = strides.size() - 2; i >= 0; --i) {
+    for (size_t i = strides.size() - 2; i >= 0; --i) {
         strides[i] = strides[i + 1] * shape[i + 1];
     }
 }
