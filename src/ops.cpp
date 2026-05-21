@@ -3,36 +3,29 @@
 #include "ops.h"
 
 static void check_matmul_shapes(const Tensor& A, const Tensor& B) {
-    std::vector<int> a_shape = A.get_shape();
-    std::vector<int> b_shape = B.get_shape();
-
     // no sense to compare 1D since matmul would become a simple dot product
-    assert(a_shape.size() >= 2 && b_shape.size() >= 2);
+    assert(A.get_rank() >= 2 && B.get_rank() >= 2);
 
-    // compare last dim of A with second-last dim of B (the rest of remaining dimensions if any are just how many times we do the matmul, also called batch dimensions)
-    assert(a_shape[a_shape.size() - 1] == b_shape[b_shape.size() - 2]);
+    // A is (..., M, K), B is (..., K, N) — the inner dim must match
+    assert(A.dim(-1) == B.dim(-2));
 
     // all remaining dims must be equal (stricter than numpy/pytorch 'broadcastable')
-    assert(a_shape.size() == b_shape.size());
-    for (size_t i = 0; i < b_shape.size() - 2; ++i) {
-        assert(a_shape[i] == b_shape[i]);
+    assert(A.get_rank() == B.get_rank());
+    for (int i = 0; i < A.get_rank() - 2; ++i) {
+        assert(A.dim(i) == B.dim(i));
     }
-} 
+}
 
 static std::vector<int> compute_matmul_output_shape(const Tensor& A, const Tensor& B) {
-    std::vector<int> a_shape = A.get_shape();
-    std::vector<int> b_shape = B.get_shape();
+    // (..., M, K) x (..., K, N) = (..., M, N) — copy batch dims, then append M and N
     std::vector<int> out_shape;
-    out_shape.reserve(a_shape.size());
-    for (size_t i = 0; i < a_shape.size() - 2; ++i) {
-        out_shape.push_back(a_shape[i]);
+    out_shape.reserve(A.get_rank());
+    for (int i = 0; i < A.get_rank() - 2; ++i) {
+        out_shape.push_back(A.dim(i));
     }
-    int M = a_shape[a_shape.size() - 2];
-    int N = b_shape[b_shape.size() - 1];
-    out_shape.push_back(M);
-    out_shape.push_back(N);
-
-    return out_shape; // (..., M, K) x (..., K, N) = (..., M, N)
+    out_shape.push_back(A.dim(-2));   // M
+    out_shape.push_back(B.dim(-1));   // N
+    return out_shape;
 }
 
 void Operations::matmul_2d(const float* A_data, const float* B_data, float* OUT_data, int M, int K, int N) {
@@ -53,18 +46,17 @@ void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     // check if OUT has the right final dimension
     assert(OUT.get_shape() == compute_matmul_output_shape(A, B));
 
-    // check overall batch size excluding matmul dimensions
-    std::vector<int> a_shape = A.get_shape();
-    std::vector<int> b_shape = B.get_shape();
-    int M = a_shape[a_shape.size() - 2];
-    int K = a_shape[a_shape.size() - 1];
-    int N = b_shape[b_shape.size() - 1];
+    // A is (..., M, K), B is (..., K, N)
+    const int M = A.dim(-2);
+    const int K = A.dim(-1);
+    const int N = B.dim(-1);
+
+    // total batch size = product of all leading dims (everything before the last two)
     int batch_size = 1;
-    for (size_t i = 0; i + 2 < a_shape.size(); ++i) {
-        batch_size *= a_shape[i];
+    for (int i = 0; i + 2 < A.get_rank(); ++i) {
+        batch_size *= A.dim(i);
     }
 
-    // get second-last and last dimensions for A, B to correctly do matmul_2d
     const float* A_data = A.data_ptr();
     const float* B_data = B.data_ptr();
     float* OUT_data = OUT.data_ptr();
@@ -72,5 +64,45 @@ void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     // do matmul across batches
     for (size_t b = 0; b < batch_size; ++b) {
         matmul_2d(A_data + b * (M * K), B_data + b * (K * N), OUT_data + b * (M * N), M, K, N);
+    }
+}
+
+void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
+    int hidden_dim = IN.dim(-1);
+    int batch_size = 1;
+    for (int i = 0; i + 1 < IN.get_rank(); ++i) {
+        batch_size *= IN.dim(i);
+    }
+
+    const float* in_data = IN.data_ptr();
+    const float* w_data = W.data_ptr();
+    float* out_data = OUT.data_ptr();
+    for (size_t b = 0; b < batch_size; ++b) {
+        // mean square aggregation
+        float sum = 0;
+        for (int i = 0; i < hidden_dim; ++i) {
+            sum += in_data[b * hidden_dim + i] * in_data[b * hidden_dim + i];
+        }
+
+        // scalar mul to OUT
+        float rms = sqrtf(sum / hidden_dim + eps);
+        float inv_rms = 1.0f / rms;
+        for(int i = 0; i < hidden_dim; ++i) {
+            out_data[b * hidden_dim + i] = in_data[b * hidden_dim + i] * inv_rms * w_data[i];
+        }
+    }
+}
+
+void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
+    assert(IN.get_shape() == OUT.get_shape());
+
+    const float* in_data = IN.data_ptr();
+    float* out_data = OUT.data_ptr();
+
+    int total_dim = 1;
+    for (int d : IN.get_shape()) total_dim *= d;
+
+    for (int i = 0; i < total_dim; ++i) {
+        out_data[i] = in_data[i] / (1.0f + expf(-in_data[i]));
     }
 }

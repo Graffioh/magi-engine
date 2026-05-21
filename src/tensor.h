@@ -10,15 +10,11 @@ class Tensor {
 public:
     Tensor(std::vector<int> shape);
 
-    float operator()(int i) const;
-    float operator()(int i, int j) const;
-    float operator()(int i, int j, int k) const;
-    void write(int i, float value);
-    void write(int i, int j, float value);
-    void write(int i, int j, int k, float value);
     const float* data_ptr() const { return data.data(); };
     float* data_ptr() { return data.data(); };
 
     const std::vector<int>& get_shape() const { return shape; }
+    int get_rank() const { return shape.size(); };
+    int dim(int axis) const { return shape[axis < 0 ? shape.size() + axis : axis]; }
     const std::vector<int>& get_strides() const { return strides; }
 };
