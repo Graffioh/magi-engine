@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 
 #include "ops.h"
 
@@ -40,6 +41,7 @@ void Operations::matmul_2d(const float* A_data, const float* B_data, float* OUT_
     }
 }
 
+// OUT[i, j] = sum_k A[i, k] * B[k, j]
 void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     // check if A and B have compatible dimensions
     check_matmul_shapes(A, B);
@@ -82,6 +84,8 @@ void Operations::RMSNorm_1d(const float* IN_data, const float* W_data, float* OU
     }
 }
 
+// rms  = sqrt((1/n) * sum_j IN[j]^2 + eps)
+// OUT[i] = (IN[i] / rms) * W[i]
 void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
     int hidden_dim = IN.dim(-1);
     int batch_size = 1;
@@ -99,6 +103,7 @@ void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float e
     }
 }
 
+// SiLU(x) = x * sigmoid(x) = x / (1 + e^(-x))
 void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
     assert(IN.get_shape() == OUT.get_shape());
 
@@ -112,6 +117,7 @@ void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
     }
 }
 
+// OUT[i] = A[i] + B[i]   (elementwise)
 void Operations::add(const Tensor& A, const Tensor& B, Tensor& OUT) {
     assert(A.get_shape() == B.get_shape());
     assert(A.get_shape() == OUT.get_shape());
@@ -126,6 +132,7 @@ void Operations::add(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
+// OUT[i] = A[i] * B[i]   (elementwise / Hadamard product)
 void Operations::mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     assert(A.get_shape() == B.get_shape());
     assert(A.get_shape() == OUT.get_shape());
@@ -137,5 +144,33 @@ void Operations::mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     float* out_data = OUT.data_ptr();
     for (int i = 0; i < total_dim; ++i) {
         out_data[i] = a_data[i] * b_data[i];
+    }
+}
+
+// m = max_j IN[j]
+// softmax(IN)_i = e^(IN[i] - m) / sum_j e^(IN[j] - m)   (along last dim)
+void Operations::softmax(const Tensor& IN, Tensor& OUT) {
+    int batch_size = 1;
+    for (int i = 0; i + 1 < IN.get_rank(); ++i) {
+        batch_size *= IN.dim(i);
+    }
+
+    const float* in_data = IN.data_ptr();
+    float* out_data = OUT.data_ptr();
+    int last_dim = IN.dim(-1);
+    for (int b = 0; b < batch_size; ++b) {
+        const float* row = in_data + b * last_dim;
+        float max_val = *std::max_element(row, row + last_dim);
+
+        float sum_j = 0;
+        for (int j = 0; j < last_dim; ++j) {
+            float e = exp(in_data[b * last_dim + j] - max_val);
+            out_data[b * last_dim + j] = e;
+            sum_j += e;
+        }
+
+        for (int i = 0; i < last_dim; ++i) {
+            out_data[b * last_dim + i] /= sum_j;
+        }
     }
 }

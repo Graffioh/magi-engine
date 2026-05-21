@@ -10,4 +10,5 @@ class Operations {
         void SiLU(const Tensor& IN, Tensor& OUT);
         void add(const Tensor& A, const Tensor& B, Tensor& OUT);
         void mul(const Tensor& A, const Tensor& B, Tensor& OUT);
+        void softmax(const Tensor& IN, Tensor& OUT);
 };
