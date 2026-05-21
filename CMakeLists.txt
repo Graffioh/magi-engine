@@ -18,3 +18,41 @@ target_compile_options(magi_engine PRIVATE
   -Wextra
   -Wpedantic
 )
+
+add_executable(magi_tests
+  tests/test_main.cpp
+  tests/test_tensor.cpp
+  tests/test_ops.cpp
+  src/layers.cpp
+  src/ops.cpp
+  src/tensor.cpp
+)
+
+target_include_directories(magi_tests PRIVATE src)
+
+target_compile_options(magi_tests PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+)
+
+enable_testing()
+add_test(NAME magi_tests COMMAND magi_tests)
+
+# Convenience targets so you can do:
+#   cmake --build build --target run    -> build and run the engine
+#   cmake --build build --target check  -> build and run the test suite
+# (`test` is reserved by CTest, hence `check`. You can also use `ctest --test-dir build`.)
+add_custom_target(run
+  COMMAND magi_engine
+  DEPENDS magi_engine
+  USES_TERMINAL
+  COMMENT "Running magi_engine"
+)
+
+add_custom_target(check
+  COMMAND magi_tests
+  DEPENDS magi_tests
+  USES_TERMINAL
+  COMMENT "Running magi_tests"
+)

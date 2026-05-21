@@ -67,6 +67,21 @@ void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
+void Operations::rmsnorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
+    // mean square aggregation
+    float sum = 0;
+    for (int i = 0; i < dim; ++i) {
+        sum += IN_data[i] * IN_data[i];
+    }
+
+    // scalar mul to out
+    float rms = sqrtf(sum / dim + eps);
+    float inv_rms = 1.0f / rms;
+    for (int i = 0; i < dim; ++i) {
+        OUT_data[i] = IN_data[i] * inv_rms * W_data[i];
+    }
+}
+
 void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
     int hidden_dim = IN.dim(-1);
     int batch_size = 1;
@@ -77,19 +92,10 @@ void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float e
     const float* in_data = IN.data_ptr();
     const float* w_data = W.data_ptr();
     float* out_data = OUT.data_ptr();
-    for (size_t b = 0; b < batch_size; ++b) {
-        // mean square aggregation
-        float sum = 0;
-        for (int i = 0; i < hidden_dim; ++i) {
-            sum += in_data[b * hidden_dim + i] * in_data[b * hidden_dim + i];
-        }
 
-        // scalar mul to OUT
-        float rms = sqrtf(sum / hidden_dim + eps);
-        float inv_rms = 1.0f / rms;
-        for(int i = 0; i < hidden_dim; ++i) {
-            out_data[b * hidden_dim + i] = in_data[b * hidden_dim + i] * inv_rms * w_data[i];
-        }
+    // weight is shared across rows (size hidden_dim), input/output advance per row
+    for (size_t b = 0; b < batch_size; ++b) {
+        rmsnorm_1d(in_data + b * hidden_dim, w_data, out_data + b * hidden_dim, hidden_dim, eps);
     }
 }
 
