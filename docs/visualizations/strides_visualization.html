@@ -319,6 +319,19 @@
   </section>
 
   <section>
+    <h2>3D voxel view — rotate to see the geometry</h2>
+    <div class="panel">
+      <div id="threeContainer" style="position:relative; width:100%; height:560px; background:#1c2130; border:1px solid var(--border-soft); border-radius:8px; overflow:hidden; cursor:grab;">
+        <canvas id="threeCanvas" style="display:block; width:100%; height:100%;"></canvas>
+        <div id="threeHud" style="position:absolute; top:10px; left:12px; font-family:ui-monospace,monospace; font-size:11px; color:var(--muted); pointer-events:none; background:rgba(20,24,35,0.6); padding:5px 9px; border-radius:6px; border:1px solid var(--border-soft);">drag to rotate · scroll to zoom · click a voxel to select</div>
+      </div>
+      <p class="footnote">
+        Each cube is one element of the tensor, positioned by its multi-index. Colored arrows from the selected voxel show <code>+1 along axis k</code> — each is the same 1-unit geometric step in space, but the label is the actual <em>memory jump</em> (the stride). Notice how the same little geometric step can mean very different memory jumps depending on which axis you bumped.
+      </p>
+    </div>
+  </section>
+
+  <section>
     <h2>flat memory — see the jumps</h2>
     <div class="panel">
       <div class="strip-wrap">
@@ -369,6 +382,348 @@ strides.resize(shape.size(), <span class="num">1</span>);                <span c
   </section>
 </main>
 
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const COLOR_HEX = ['#7cc4ff','#f0a35a','#74d99f','#c099ff','#ff7eb6'];
+
+const container = document.getElementById('threeContainer');
+const canvas = document.getElementById('threeCanvas');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#1c2130');
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(container.clientWidth, container.clientHeight, false);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+keyLight.position.set(6, 10, 7);
+scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.45);
+fillLight.position.set(-5, -3, -5);
+scene.add(fillLight);
+const rimLight = new THREE.DirectionalLight(0xb8c4ff, 0.25);
+rimLight.position.set(0, -8, 4);
+scene.add(rimLight);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+
+const root = new THREE.Group();
+scene.add(root);
+const voxelGroup = new THREE.Group();
+const edgeGroup  = new THREE.Group();
+const arrowGroup = new THREE.Group();
+const labelGroup = new THREE.Group();
+root.add(voxelGroup, edgeGroup, arrowGroup, labelGroup);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+const sharedBoxGeo  = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+const sharedEdgeGeo = new THREE.EdgesGeometry(sharedBoxGeo);
+
+let voxels = [];
+let state = { shape: [], strides: [], selectedFlat: 0, focusAxis: -1 };
+
+function disposeGroup(grp) {
+  grp.traverse(o => {
+    if (o.material) {
+      if (o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  });
+  grp.clear();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function makeTextSprite(text, color, opts = {}) {
+  const fontSize = opts.fontSize ?? 52;
+  const padding = 14;
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = `bold ${fontSize}px ui-monospace, monospace`;
+  const w = Math.ceil(probe.measureText(text).width + padding * 2);
+  const h = fontSize + padding * 2;
+  const dpr = window.devicePixelRatio || 1;
+  const cnv = document.createElement('canvas');
+  cnv.width = w * dpr; cnv.height = h * dpr;
+  const ctx = cnv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = 'rgba(20,24,35,0.92)';
+  roundRect(ctx, 0, 0, w, h, 8); ctx.fill();
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  roundRect(ctx, 1, 1, w-2, h-2, 8); ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.font = `bold ${fontSize}px ui-monospace, monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, w/2, h/2);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sp = new THREE.Sprite(mat);
+  const scaleY = opts.size ?? 0.55;
+  sp.scale.set(scaleY * (w / h), scaleY, 1);
+  sp.renderOrder = 10;
+  return sp;
+}
+
+function flatToMulti(flat, strides, n) {
+  const idx = new Array(n).fill(0);
+  let rem = flat;
+  for (let i = 0; i < n; i++) { idx[i] = Math.floor(rem / strides[i]); rem %= strides[i]; }
+  return idx;
+}
+
+function voxelPos(idx) {
+  const n = idx.length;
+  const spacing = 1.4;
+  const groupGap = spacing * 1.4;
+  let x = 0, y = 0, z = 0;
+  if (n === 1) {
+    x = idx[0] * spacing;
+  } else if (n === 2) {
+    x = idx[1] * spacing;
+    y = -idx[0] * spacing;
+  } else if (n === 3) {
+    x = idx[2] * spacing;
+    y = -idx[1] * spacing;
+    z = -idx[0] * spacing;
+  } else {
+    // 4D: axis 0 lays out groups along X with an extra gap
+    const groupSize = state.shape[3] * spacing + groupGap;
+    x = idx[0] * groupSize + idx[3] * spacing;
+    y = -idx[2] * spacing;
+    z = -idx[1] * spacing;
+  }
+  return new THREE.Vector3(x, y, z);
+}
+
+function makeArrow(from, to, hex) {
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  if (len < 1e-4) return null;
+  dir.normalize();
+  const color = new THREE.Color(hex);
+  const grp = new THREE.Group();
+  const headLen = Math.min(0.5, len * 0.32);
+  const shaftLen = Math.max(0.05, len - headLen);
+  const shaftMat = new THREE.MeshBasicMaterial({ color });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, shaftLen, 12), shaftMat);
+  shaft.position.y = shaftLen / 2;
+  const headMat = new THREE.MeshBasicMaterial({ color });
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.13, headLen, 12), headMat);
+  head.position.y = shaftLen + headLen / 2;
+  grp.add(shaft, head);
+  grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  grp.position.copy(from);
+  return grp;
+}
+
+function fitCamera() {
+  if (voxels.length === 0) return;
+  const min = new THREE.Vector3( Infinity,  Infinity,  Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  voxels.forEach(v => { min.min(v.pos); max.max(v.pos); });
+  const center = min.clone().add(max).multiplyScalar(0.5);
+  const size = max.clone().sub(min);
+  const radius = Math.max(size.length() / 2, 2) + 1.5;
+  controls.target.copy(center);
+  const n = state.shape.length;
+  const dist = radius * 2.3;
+  // rank-aware angle: 1D / 2D want more head-on, 3D+ wants the iso diagonal
+  if (n <= 1) {
+    camera.position.set(center.x, center.y + dist * 0.3, dist * 0.95);
+  } else if (n === 2) {
+    camera.position.set(center.x + dist * 0.25, center.y + dist * 0.2, dist * 0.95);
+  } else {
+    camera.position.set(center.x + dist * 0.65, center.y + dist * 0.45, center.z + dist * 0.85);
+  }
+  controls.update();
+}
+
+function rebuildVoxels() {
+  disposeGroup(voxelGroup);
+  disposeGroup(edgeGroup);
+  voxels = [];
+
+  const n = state.shape.length;
+  if (n === 0) { applyHighlights(); return; }
+  const total = state.shape.reduce((a, b) => a * b, 1);
+
+  for (let f = 0; f < total; f++) {
+    const idx = flatToMulti(f, state.strides, n);
+    const pos = voxelPos(idx);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x6a7593, transparent: true, opacity: 1.0 });
+    const mesh = new THREE.Mesh(sharedBoxGeo, mat);
+    mesh.position.copy(pos);
+    mesh.userData = { flat: f };
+    voxelGroup.add(mesh);
+    voxels.push({ mesh, flat: f, idx, pos });
+
+    const edges = new THREE.LineSegments(
+      sharedEdgeGeo,
+      new THREE.LineBasicMaterial({ color: 0xc4cbe0, transparent: true, opacity: 0.6 })
+    );
+    edges.position.copy(pos);
+    edgeGroup.add(edges);
+  }
+
+  fitCamera();
+  applyHighlights();
+}
+
+function applyHighlights() {
+  disposeGroup(arrowGroup);
+  disposeGroup(labelGroup);
+
+  const n = state.shape.length;
+  if (n === 0 || voxels.length === 0) return;
+
+  const selIdx = flatToMulti(state.selectedFlat, state.strides, n);
+
+  voxels.forEach(v => {
+    const mat = v.mesh.material;
+    if (v.flat === state.selectedFlat) {
+      mat.color.set(0x7cc4ff);
+      mat.emissive = new THREE.Color(0x3a7bb0);
+      mat.opacity = 1.0;
+      v.mesh.scale.setScalar(1.18);
+    } else if (state.focusAxis >= 0) {
+      let onLine = true;
+      for (let k = 0; k < n; k++) {
+        if (k !== state.focusAxis && v.idx[k] !== selIdx[k]) { onLine = false; break; }
+      }
+      if (onLine) {
+        mat.color.set(COLOR_HEX[state.focusAxis % 5]);
+        mat.emissive = new THREE.Color(0x000000);
+        mat.opacity = 1.0;
+      } else {
+        mat.color.set(0x2a3142);
+        mat.emissive = new THREE.Color(0x000000);
+        mat.opacity = 0.18;
+      }
+      v.mesh.scale.setScalar(1.0);
+    } else {
+      mat.color.set(0x6a7593);
+      mat.emissive = new THREE.Color(0x000000);
+      mat.opacity = 1.0;
+      v.mesh.scale.setScalar(1.0);
+    }
+  });
+
+  // match the edge brightness to the voxel state so the selected one's outline really pops
+  const edges = edgeGroup.children;
+  for (let i = 0; i < voxels.length; i++) {
+    const e = edges[i]; if (!e) continue;
+    const isSel = voxels[i].flat === state.selectedFlat;
+    e.material.color.set(isSel ? 0xeaf4ff : 0xc4cbe0);
+    e.material.opacity = isSel ? 1.0 : 0.6;
+    e.scale.setScalar(isSel ? 1.18 : 1.0);
+  }
+
+  const fromPos = voxelPos(selIdx);
+  const axes = state.focusAxis >= 0 ? [state.focusAxis] : Array.from({length: n}, (_, i) => i);
+  axes.forEach(ax => {
+    if (selIdx[ax] + 1 >= state.shape[ax]) return;
+    const toIdx = selIdx.slice(); toIdx[ax] += 1;
+    const toPos = voxelPos(toIdx);
+    const arrow = makeArrow(fromPos, toPos, COLOR_HEX[ax % 5]);
+    if (arrow) arrowGroup.add(arrow);
+    // anchor the label at the TARGET voxel so labels don't all stack at the source
+    const sp = makeTextSprite(`+${state.strides[ax]}  axis ${ax}`, COLOR_HEX[ax % 5], { fontSize: 40, size: 0.46 });
+    const lp = toPos.clone(); lp.y += 0.95;
+    sp.position.copy(lp);
+    labelGroup.add(sp);
+  });
+
+  const selSp = makeTextSprite(`[${state.selectedFlat}]  (${selIdx.join(',')})`, '#7cc4ff', { fontSize: 38, size: 0.44 });
+  const labelPos = fromPos.clone();
+  labelPos.y += 1.45;
+  selSp.position.copy(labelPos);
+  labelGroup.add(selSp);
+}
+
+// click-vs-drag detection so orbiting doesn't fire selection
+let pointerDown = false;
+let downPt = { x: 0, y: 0 };
+let dragged = false;
+canvas.addEventListener('pointerdown', (e) => {
+  pointerDown = true; dragged = false; downPt = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointerDown) return;
+  if (Math.abs(e.clientX - downPt.x) + Math.abs(e.clientY - downPt.y) > 4) dragged = true;
+});
+canvas.addEventListener('pointerup', (e) => {
+  const wasDrag = dragged;
+  pointerDown = false; dragged = false;
+  if (wasDrag) return;
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(voxels.map(v => v.mesh), false);
+  if (hits.length > 0 && typeof window.threeOnSelect === 'function') {
+    window.threeOnSelect(hits[0].object.userData.flat);
+  }
+});
+
+function resize() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  if (!w || !h) return;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false);
+}
+window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(container);
+
+(function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+window.threeScene = {
+  update(shape, strides, focusAxis, selectedFlat) {
+    const shapeChanged = JSON.stringify(shape) !== JSON.stringify(state.shape);
+    state = { shape: shape.slice(), strides: strides.slice(), focusAxis, selectedFlat };
+    if (shapeChanged) rebuildVoxels();
+    else applyHighlights();
+  }
+};
+
+// catch up if the IIFE already pushed state before this module finished loading
+if (window.__strideState) {
+  const s = window.__strideState;
+  window.threeScene.update(s.shape, s.strides, s.focusAxis, s.selectedFlat);
+}
+</script>
 <script>
 (function() {
   const $ = (id) => document.getElementById(id);
@@ -394,6 +749,9 @@ strides.resize(shape.size(), <span class="num">1</span>);                <span c
   let stepIdx = 0;
   let playing = false;
   let playTimer = null;
+
+  // 3D scene calls this when the user clicks a voxel
+  window.threeOnSelect = (flat) => { selectedFlat = flat; renderAll(); };
 
   function parseShape(text) {
     const parts = text.split(/[,\s]+/).filter(Boolean);
@@ -729,6 +1087,9 @@ strides.resize(shape.size(), <span class="num">1</span>);                <span c
     renderStrip();
     renderBuilder();
     renderIndexer();
+    // sync 3D voxel view (and stash for the module if it hasn't loaded yet)
+    window.__strideState = { shape: shape.slice(), strides: strides.slice(), focusAxis, selectedFlat };
+    if (window.threeScene) window.threeScene.update(shape, strides, focusAxis, selectedFlat);
   }
 
   function rebuild() {
