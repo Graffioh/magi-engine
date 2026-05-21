@@ -95,7 +95,7 @@ void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float e
 
     // weight is shared across rows (size hidden_dim), input/output advance per row
     for (size_t b = 0; b < batch_size; ++b) {
-        rmsnorm_1d(in_data + b * hidden_dim, w_data, out_data + b * hidden_dim, hidden_dim, eps);
+        RMSNorm_1d(in_data + b * hidden_dim, w_data, out_data + b * hidden_dim, hidden_dim, eps);
     }
 }
 
@@ -105,10 +105,37 @@ void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
     const float* in_data = IN.data_ptr();
     float* out_data = OUT.data_ptr();
 
-    int total_dim = 1;
-    for (int d : IN.get_shape()) total_dim *= d;
+    int total_dim = IN.total_dim();
 
     for (int i = 0; i < total_dim; ++i) {
         out_data[i] = in_data[i] / (1.0f + expf(-in_data[i]));
+    }
+}
+
+void Operations::add(const Tensor& A, const Tensor& B, Tensor& OUT) {
+    assert(A.get_shape() == B.get_shape());
+    assert(A.get_shape() == OUT.get_shape());
+
+    int total_dim = A.total_dim();
+
+    const float* a_data = A.data_ptr();
+    const float* b_data = B.data_ptr();
+    float* out_data = OUT.data_ptr();
+    for (int i = 0; i < total_dim; ++i) {
+        out_data[i] = a_data[i] + b_data[i];
+    }
+}
+
+void Operations::mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
+    assert(A.get_shape() == B.get_shape());
+    assert(A.get_shape() == OUT.get_shape());
+
+    int total_dim = A.total_dim();
+
+    const float* a_data = A.data_ptr();
+    const float* b_data = B.data_ptr();
+    float* out_data = OUT.data_ptr();
+    for (int i = 0; i < total_dim; ++i) {
+        out_data[i] = a_data[i] * b_data[i];
     }
 }

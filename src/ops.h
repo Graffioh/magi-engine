@@ -8,4 +8,6 @@ class Operations {
         void matmul(const Tensor& A, const Tensor& B, Tensor& OUT);
         void RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps = 1e-5);
         void SiLU(const Tensor& IN, Tensor& OUT);
+        void add(const Tensor& A, const Tensor& B, Tensor& OUT);
+        void mul(const Tensor& A, const Tensor& B, Tensor& OUT);
 };
