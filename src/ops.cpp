@@ -67,7 +67,7 @@ void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
-void Operations::rmsnorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
+void Operations::RMSNorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
     // mean square aggregation
     float sum = 0;
     for (int i = 0; i < dim; ++i) {
