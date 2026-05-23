@@ -28,7 +28,6 @@ static void fill(Tensor& t, const std::vector<float>& vals) {
 }
 
 int main() {
-    Operations ops;
     int passed = 0, failed = 0;
 
     auto check = [&](const std::string& name, const Tensor& got, const std::vector<float>& expected, float tol = 1e-5f) {
@@ -68,7 +67,7 @@ int main() {
         Tensor A({2, 2}), B({2, 2}), C({2, 2});
         fill(A, {1, 2, 3, 4});
         fill(B, {5, 6, 7, 8});
-        ops.matmul(A, B, C);
+        ops::matmul(A, B, C);
         check("(2,2) x (2,2)", C, {19, 22, 43, 50});
     }
 
@@ -77,7 +76,7 @@ int main() {
         Tensor A({2, 3}), B({3, 2}), C({2, 2});
         fill(A, {1, 2, 3, 4, 5, 6});
         fill(B, {1, 2, 3, 4, 5, 6});
-        ops.matmul(A, B, C);
+        ops::matmul(A, B, C);
         check("(2,3) x (3,2)", C, {22, 28, 49, 64});
     }
 
@@ -86,7 +85,7 @@ int main() {
         Tensor I({3, 3}), B({3, 3}), C({3, 3});
         fill(I, {1, 0, 0, 0, 1, 0, 0, 0, 1});
         fill(B, {7, 8, 9, 1, 2, 3, 4, 5, 6});
-        ops.matmul(I, B, C);
+        ops::matmul(I, B, C);
         check("identity passes B through", C, {7, 8, 9, 1, 2, 3, 4, 5, 6});
     }
 
@@ -95,7 +94,7 @@ int main() {
         Tensor A({2, 2, 2}), B({2, 2, 2}), C({2, 2, 2});
         fill(A, {1, 2, 3, 4,  1, 0, 0, 1});
         fill(B, {5, 6, 7, 8,  9, 8, 7, 6});
-        ops.matmul(A, B, C);
+        ops::matmul(A, B, C);
         check("batched (2,2,2) x (2,2,2)", C, {19, 22, 43, 50,  9, 8, 7, 6});
     }
 
@@ -109,7 +108,7 @@ int main() {
         Tensor X({1, 2}), W({2}), Y({1, 2});
         fill(X, {3, 4});
         fill(W, {1, 1});
-        ops.RMSNorm(X, W, Y, 0.0f);
+        ops::RMSNorm(X, W, Y, 0.0f);
         check("[3,4] W=[1,1]", Y, {0.84852813f, 1.13137085f}, 1e-4f);
     }
 
@@ -119,7 +118,7 @@ int main() {
         Tensor X({1, 2}), W({2}), Y({1, 2});
         fill(X, {3, 4});
         fill(W, {2.0f, 0.5f});
-        ops.RMSNorm(X, W, Y, 0.0f);
+        ops::RMSNorm(X, W, Y, 0.0f);
         check("[3,4] W=[2,0.5]", Y, {1.69705627f, 0.56568542f}, 1e-4f);
     }
 
@@ -130,7 +129,7 @@ int main() {
         Tensor X({2, 2}), W({2}), Y({2, 2});
         fill(X, {3, 4,  1, 1});
         fill(W, {1, 1});
-        ops.RMSNorm(X, W, Y, 0.0f);
+        ops::RMSNorm(X, W, Y, 0.0f);
         check("two rows normalized independently", Y, {0.84852813f, 1.13137085f, 1.0f, 1.0f}, 1e-4f);
     }
 
@@ -141,7 +140,7 @@ int main() {
         Tensor X({2, 2, 2}), W({2}), Y({2, 2, 2});
         fill(X, {3, 4, 3, 4, 3, 4, 3, 4});
         fill(W, {1, 1});
-        ops.RMSNorm(X, W, Y, 0.0f);
+        ops::RMSNorm(X, W, Y, 0.0f);
         std::vector<float> expected;
         for (int r = 0; r < 4; ++r) {
             expected.push_back(0.84852813f);
@@ -155,7 +154,7 @@ int main() {
         Tensor X({1, 3}), W({3}), Y({1, 3});
         fill(X, {0, 0, 0});
         fill(W, {1, 1, 1});
-        ops.RMSNorm(X, W, Y, 1e-5f);
+        ops::RMSNorm(X, W, Y, 1e-5f);
         // sum_sq = 0, rms = sqrt(0/3 + 1e-5) ≈ 0.003162; inv_rms ≈ 316.23
         // each output = 0 * inv_rms * 1 = 0 → no NaN, just zeros
         check("all-zero row stays finite", Y, {0.0f, 0.0f, 0.0f}, 1e-4f);

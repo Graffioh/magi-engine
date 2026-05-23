@@ -1,9 +1,12 @@
 #include <cassert>
 #include <algorithm>
+#include <cmath>
 
 #include "ops.h"
 
-static void check_matmul_shapes(const Tensor& A, const Tensor& B) {
+namespace {
+
+void check_matmul_shapes(const Tensor& A, const Tensor& B) {
     // no sense to compare 1D since matmul would become a simple dot product
     assert(A.get_rank() >= 2 && B.get_rank() >= 2);
 
@@ -17,7 +20,7 @@ static void check_matmul_shapes(const Tensor& A, const Tensor& B) {
     }
 }
 
-static std::vector<int> compute_matmul_output_shape(const Tensor& A, const Tensor& B) {
+std::vector<int> compute_matmul_output_shape(const Tensor& A, const Tensor& B) {
     // (..., M, K) x (..., K, N) = (..., M, N) — copy batch dims, then append M and N
     std::vector<int> out_shape;
     out_shape.reserve(A.get_rank());
@@ -29,11 +32,11 @@ static std::vector<int> compute_matmul_output_shape(const Tensor& A, const Tenso
     return out_shape;
 }
 
-void Operations::matmul_2d(const float* A_data, const float* B_data, float* OUT_data, int M, int K, int N) {
-    for (size_t i = 0; i < M; ++i) {
-        for (size_t j = 0; j < N; ++j) {
+void matmul_2d(const float* A_data, const float* B_data, float* OUT_data, int M, int K, int N) {
+    for (int i = 0; i < M; ++i) {
+        for (int j = 0; j < N; ++j) {
             float sum = 0;
-            for (size_t k = 0; k < K; ++k) {
+            for (int k = 0; k < K; ++k) {
                 sum += A_data[i * K + k] * B_data[k * N + j];
             }
             OUT_data[i * N + j] = sum;
@@ -41,35 +44,7 @@ void Operations::matmul_2d(const float* A_data, const float* B_data, float* OUT_
     }
 }
 
-// OUT[i, j] = sum_k A[i, k] * B[k, j]
-void Operations::matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
-    // check if A and B have compatible dimensions
-    check_matmul_shapes(A, B);
-    // check if OUT has the right final dimension
-    assert(OUT.get_shape() == compute_matmul_output_shape(A, B));
-
-    // A is (..., M, K), B is (..., K, N)
-    const int M = A.dim(-2);
-    const int K = A.dim(-1);
-    const int N = B.dim(-1);
-
-    // total batch size = product of all leading dims (everything before the last two)
-    int batch_size = 1;
-    for (int i = 0; i + 2 < A.get_rank(); ++i) {
-        batch_size *= A.dim(i);
-    }
-
-    const float* A_data = A.data_ptr();
-    const float* B_data = B.data_ptr();
-    float* OUT_data = OUT.data_ptr();
-
-    // do matmul across batches
-    for (size_t b = 0; b < batch_size; ++b) {
-        matmul_2d(A_data + b * (M * K), B_data + b * (K * N), OUT_data + b * (M * N), M, K, N);
-    }
-}
-
-void Operations::RMSNorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
+void RMSNorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
     // mean square aggregation
     float sum = 0;
     for (int i = 0; i < dim; ++i) {
@@ -84,9 +59,41 @@ void Operations::RMSNorm_1d(const float* IN_data, const float* W_data, float* OU
     }
 }
 
+} // anonymous namespace
+
+namespace ops {
+
+// OUT[i, j] = sum_k A[i, k] * B[k, j]
+void matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
+    // check if A and B have compatible dimensions
+    check_matmul_shapes(A, B);
+    // check if OUT has the right final dimension
+    assert(OUT.get_shape() == compute_matmul_output_shape(A, B));
+
+    // A is (..., M, K), B is (..., K, N)
+    const int M = A.dim(-2);
+    const int K = A.dim(-1); // === B.dim(-2)
+    const int N = B.dim(-1);
+
+    // total batch size = product of all leading dims (everything before the last two)
+    int batch_size = 1;
+    for (int i = 0; i + 2 < A.get_rank(); ++i) {
+        batch_size *= A.dim(i);
+    }
+
+    const float* A_data = A.data_ptr();
+    const float* B_data = B.data_ptr();
+    float* OUT_data = OUT.data_ptr();
+
+    // do matmul across batches
+    for (int b = 0; b < batch_size; ++b) {
+        matmul_2d(A_data + b * (M * K), B_data + b * (K * N), OUT_data + b * (M * N), M, K, N);
+    }
+}
+
 // rms  = sqrt((1/n) * sum_j IN[j]^2 + eps)
 // OUT[i] = (IN[i] / rms) * W[i]
-void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
+void RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
     int hidden_dim = IN.dim(-1);
     int batch_size = 1;
     for (int i = 0; i + 1 < IN.get_rank(); ++i) {
@@ -98,13 +105,13 @@ void Operations::RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float e
     float* out_data = OUT.data_ptr();
 
     // weight is shared across rows (size hidden_dim), input/output advance per row
-    for (size_t b = 0; b < batch_size; ++b) {
+    for (int b = 0; b < batch_size; ++b) {
         RMSNorm_1d(in_data + b * hidden_dim, w_data, out_data + b * hidden_dim, hidden_dim, eps);
     }
 }
 
 // SiLU(x) = x * sigmoid(x) = x / (1 + e^(-x))
-void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
+void SiLU(const Tensor& IN, Tensor& OUT) {
     assert(IN.get_shape() == OUT.get_shape());
 
     const float* in_data = IN.data_ptr();
@@ -118,7 +125,7 @@ void Operations::SiLU(const Tensor& IN, Tensor& OUT) {
 }
 
 // OUT[i] = A[i] + B[i]   (elementwise)
-void Operations::add(const Tensor& A, const Tensor& B, Tensor& OUT) {
+void add(const Tensor& A, const Tensor& B, Tensor& OUT) {
     assert(A.get_shape() == B.get_shape());
     assert(A.get_shape() == OUT.get_shape());
 
@@ -133,7 +140,7 @@ void Operations::add(const Tensor& A, const Tensor& B, Tensor& OUT) {
 }
 
 // OUT[i] = A[i] * B[i]   (elementwise / Hadamard product)
-void Operations::mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
+void mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     assert(A.get_shape() == B.get_shape());
     assert(A.get_shape() == OUT.get_shape());
 
@@ -149,7 +156,7 @@ void Operations::mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
 
 // m = max_j IN[j]
 // softmax(IN)_i = e^(IN[i] - m) / sum_j e^(IN[j] - m)   (along last dim)
-void Operations::softmax(const Tensor& IN, Tensor& OUT) {
+void softmax(const Tensor& IN, Tensor& OUT) {
     int batch_size = 1;
     for (int i = 0; i + 1 < IN.get_rank(); ++i) {
         batch_size *= IN.dim(i);
@@ -164,7 +171,7 @@ void Operations::softmax(const Tensor& IN, Tensor& OUT) {
 
         float sum_j = 0;
         for (int j = 0; j < last_dim; ++j) {
-            float e = exp(in_data[b * last_dim + j] - max_val);
+            float e = expf(in_data[b * last_dim + j] - max_val);
             out_data[b * last_dim + j] = e;
             sum_j += e;
         }
@@ -174,3 +181,5 @@ void Operations::softmax(const Tensor& IN, Tensor& OUT) {
         }
     }
 }
+
+} // namespace ops

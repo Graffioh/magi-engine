@@ -14,10 +14,10 @@ RMSNorm, SwiGLU MLP, grouped-query attention).
 Scope: storage, math primitives, and a build that runs.
 
 - [x] `Tensor`: contiguous float storage, shape, strides, indexing helpers.
-- [ ] Shape validation utilities that throw with useful messages.
-- [ ] `ops`: `matmul`, `matmul_transposed_b`, `rmsnorm`, `softmax`, `silu`,
+- [x] Shape validation utilities that throw with useful messages.
+- [x] `ops`: `matmul`, `matmul_transposed_b`, `rmsnorm`, `softmax`, `silu`,
       elementwise add/mul.
-- [ ] `main.cpp` smoke test: build a tiny tensor, run an op, print a value.
+- [x] `main.cpp` smoke test: build a tiny tensor, run an op, print a value.
 
 Exit criteria: `cmake --build build && ./build/magi_engine` prints expected
 numbers for a hand-computed matmul + RMSNorm.
