@@ -5,9 +5,10 @@ void run_ops_tests(TestState& s) {
     (void)s;
 
     Tensor A({2, 2});
-    Tensor B({2, 3});
+    Tensor B({3, 2});
     fill(A, {1.1f, 4.2f, 3, 5});
-    fill(B, {1, 0.5f, 2.3f, 2, 6, 2});
+    // B logical is (K=2, N=3) = [[1, 0.5, 2.3], [2, 6, 2]]; passed transposed as (N=3, K=2).
+    fill(B, {1, 2, 0.5f, 6, 2.3f, 2});
 
     Tensor W({2});
     fill(W, {0.7f, 5});
@@ -61,33 +62,35 @@ void run_ops_tests(TestState& s) {
           std::vector<float>{1, 2, 3, 4, 5, 6, 7, 8, 9},
           std::vector<int>{3, 3});
 
-    // matmul: batched rank-3, (2, 2, 3) @ (2, 3, 2) -> (2, 2, 2)
+    // matmul: batched rank-3, A=(2,2,3) @ B=(2,2,3) (B transposed: N=2, K=3) -> (2, 2, 2)
     Tensor A_b({2, 2, 3});
-    Tensor B_b({2, 3, 2});
+    Tensor B_b({2, 2, 3});
     Tensor OUT_b({2, 2, 2});
     fill(A_b, {1, 0, 0,
                0, 1, 0,
                0, 0, 1,
                1, 1, 1});
-    fill(B_b, {1, 2,
-               3, 4,
-               5, 6,
-               1, 0,
-               0, 1,
-               0, 0});
+    // B logical per batch is (K=3, N=2); passed transposed as (N=2, K=3).
+    // batch0 logical [[1,2],[3,4],[5,6]] -> transposed [[1,3,5],[2,4,6]]
+    // batch1 logical [[1,0],[0,1],[0,0]] -> transposed [[1,0,0],[0,1,0]]
+    fill(B_b, {1, 3, 5,
+               2, 4, 6,
+               1, 0, 0,
+               0, 1, 0});
     ops::matmul(A_b, B_b, OUT_b);
-    check(s, "matmul: batched (2,2,3) @ (2,3,2)", OUT_b,
+    check(s, "matmul: batched (2,2,3) @ (2,2,3) [B transposed]", OUT_b,
           std::vector<float>{1, 2, 3, 4, 0, 0, 1, 1},
           std::vector<int>{2, 2, 2});
 
-    // matmul: non-square inner dim, (1, 4) @ (4, 1) -> (1, 1)
+    // matmul: non-square inner dim, A=(1, 4) @ B=(1, 4) (B transposed: N=1, K=4) -> (1, 1)
     Tensor A_row({1, 4});
-    Tensor B_col({4, 1});
+    Tensor B_col({1, 4});
     Tensor OUT_dot({1, 1});
     fill(A_row, {1, 2, 3, 4});
+    // B logical (K=4, N=1) = [[1],[1],[1],[1]]; transposed (N=1, K=4) = [[1,1,1,1]].
     fill(B_col, {1, 1, 1, 1});
     ops::matmul(A_row, B_col, OUT_dot);
-    check(s, "matmul: (1,4) @ (4,1)", OUT_dot,
+    check(s, "matmul: (1,4) @ (1,4) [B transposed]", OUT_dot,
           std::vector<float>{10},
           std::vector<int>{1, 1});
 

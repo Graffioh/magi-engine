@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>matmul transposed-B — stride visualization</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #141823;
+    --panel-2: #1c2130;
+    --border: #2a3142;
+    --border-soft: #232a3a;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --dim: #5c6478;
+    --accent: #7cc4ff;
+    --plain: #ff7676;
+    --trans: #74d99f;
+    --col: rgba(124, 196, 255, 0.16);
+    --active: rgba(240, 163, 90, 0.42);
+    --prev: rgba(240, 163, 90, 0.14);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 22px 28px 60px;
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+  .sub code { color: var(--text); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  /* controls */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 14px;
+  }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  .field input[type="number"] {
+    width: 56px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 7px; font-family: ui-monospace, monospace; font-size: 13px;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
+  .sep { width: 1px; height: 22px; background: var(--border); }
+  button.btn {
+    background: var(--accent); color: #0b1320; font-weight: 700;
+    border: 0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    font-family: inherit;
+  }
+  button.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.btn.ghost {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.btn.ghost:hover { border-color: var(--accent); }
+
+  /* step readout */
+  .readout {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 14px;
+    font-family: ui-monospace, monospace; font-size: 13px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .readout .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .readout .val { color: var(--text); font-weight: 700; }
+  .progress {
+    flex: 1; min-width: 100px;
+    height: 4px; background: var(--panel-2); border-radius: 999px; overflow: hidden;
+  }
+  .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width 160ms ease; }
+
+  /* strips */
+  .strip-block {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .strip-head {
+    display: flex; align-items: baseline; gap: 12px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .strip-head .name { color: var(--text); font-weight: 700; font-size: 13px; }
+  .strip-head .formula { color: var(--muted); }
+  .strip-head .formula b { color: var(--text); }
+  .strip-head .stride { margin-left: auto; }
+  .strip-head .stride .num { font-weight: 700; }
+  .strip-head .stride .num.good { color: var(--trans); }
+  .strip-head .stride .num.bad  { color: var(--plain); }
+  .strip {
+    display: flex; gap: 3px; overflow-x: auto; padding: 4px 2px;
+  }
+  .cell {
+    flex: 0 0 auto;
+    width: 44px; height: 52px;
+    border-radius: 5px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    font-family: ui-monospace, monospace;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .cell .v { font-size: 13px; color: var(--text); }
+  .cell .addr { font-size: 9px; color: var(--muted); margin-top: 2px; }
+  .cell.group-end { margin-right: 8px; }
+  .cell.col { background: var(--col); }
+  .cell.prev { background: var(--prev); border-color: rgba(240,163,90,0.4); }
+  .cell.active {
+    background: var(--active); border-color: #f0a35a;
+    transform: translateY(-2px);
+  }
+  .cell.active .v, .cell.active .addr { color: #fff; }
+  .cell .kj { font-size: 9px; color: var(--dim); margin-top: 1px; }
+
+  /* bottom row: small B matrix + code */
+  .bottom {
+    display: grid; grid-template-columns: auto 1fr; gap: 14px;
+    margin-top: 18px;
+  }
+  @media (max-width: 720px) { .bottom { grid-template-columns: 1fr; } }
+  .b-matrix {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .b-matrix .title { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+  table.matrix { border-collapse: separate; border-spacing: 3px; font-family: ui-monospace, monospace; }
+  table.matrix td {
+    width: 38px; height: 32px; text-align: center;
+    border-radius: 4px; font-size: 12px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border-soft);
+  }
+  table.matrix td.col { background: var(--col); }
+  table.matrix td.active { background: var(--active); border-color: #f0a35a; color: #fff; }
+
+  pre.code {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; font-family: ui-monospace, monospace; font-size: 12.5px;
+    overflow-x: auto; margin: 0; line-height: 1.6;
+  }
+  pre.code .kw { color: #c099ff; }
+  pre.code .ty { color: #8ed1ff; }
+  pre.code .num { color: #f0a35a; }
+  pre.code .c { color: var(--muted); font-style: italic; }
+  pre.code .hl-plain { background: rgba(255, 118, 118, 0.22); border-radius: 3px; padding: 0 3px; }
+  pre.code .hl-trans { background: rgba(116, 217, 159, 0.22); border-radius: 3px; padding: 0 3px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>matmul transposed-B — stride visualization</h1>
+  <p class="sub">
+    Same matrix <code>B</code>, two memory layouts. Walk the inner k-loop and watch the address
+    pattern: plain <code>(K,N)</code> jumps by <code>N</code> per step, transposed <code>(N,K)</code> jumps by <code>1</code>.
+  </p>
+
+  <div class="controls">
+    <div class="field">
+      <label for="K">K</label>
+      <input type="number" id="K" value="4" min="1" max="8" />
+    </div>
+    <div class="field">
+      <label for="N">N</label>
+      <input type="number" id="N" value="3" min="1" max="8" />
+    </div>
+    <div class="field">
+      <label for="J">j</label>
+      <input type="number" id="J" value="1" min="0" max="7" />
+    </div>
+    <div class="sep"></div>
+    <button id="prev" class="btn ghost">‹ prev</button>
+    <button id="play" class="btn">play</button>
+    <button id="next" class="btn">next ›</button>
+    <button id="reset" class="btn ghost">reset</button>
+    <div class="sep"></div>
+    <button id="randomize" class="btn ghost">randomize B</button>
+  </div>
+
+  <div class="readout">
+    <div><span class="lbl">step</span> <span class="val" id="rdStep">—</span></div>
+    <div><span class="lbl">B[k,j]</span> <span class="val" id="rdVal">—</span></div>
+    <div><span class="lbl">plain addr</span> <span class="val" id="rdPlain" style="color: var(--plain)">—</span></div>
+    <div><span class="lbl">trans addr</span> <span class="val" id="rdTrans" style="color: var(--trans)">—</span></div>
+    <div class="progress"><div id="progressBar"></div></div>
+  </div>
+
+  <div class="strip-block">
+    <div class="strip-head">
+      <span class="name" style="color: var(--plain)">plain (K, N)</span>
+      <span class="formula">addr = <b>k·N + j</b> — grouped by row of B</span>
+      <span class="stride">stride/step: <span class="num bad" id="stridePlain">—</span></span>
+    </div>
+    <div class="strip" id="stripPlain"></div>
+  </div>
+
+  <div class="strip-block">
+    <div class="strip-head">
+      <span class="name" style="color: var(--trans)">transposed (N, K)</span>
+      <span class="formula">addr = <b>j·K + k</b> — grouped by column of B (one output neuron)</span>
+      <span class="stride">stride/step: <span class="num good" id="strideTrans">—</span></span>
+    </div>
+    <div class="strip" id="stripTrans"></div>
+  </div>
+
+  <div class="bottom">
+    <div class="b-matrix">
+      <div class="title">B logical (K×N)</div>
+      <table class="matrix" id="matB"></table>
+    </div>
+<pre class="code"><span class="c">// inner k-loop, one output cell OUT[i, j]:</span>
+<span class="kw">for</span> (<span class="ty">int</span> k = <span class="num">0</span>; k &lt; K; ++k) {
+  sum += A[i*K + k] * B[<span class="hl-plain">k*N + j</span>];  <span class="c">// plain:      stride N</span>
+  sum += A[i*K + k] * B[<span class="hl-trans">j*K + k</span>];  <span class="c">// transposed: stride 1 → cache hit</span>
+}</pre>
+  </div>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const inputs = { K: $('K'), N: $('N'), J: $('J') };
+  let K = 4, N = 3, J = 1;
+  let B = [];
+  let kStep = -1, prevK = -1;
+  let playing = false, playTimer = null;
+
+  function randVal() { return Math.floor(Math.random() * 9) - 4; }
+
+  function buildB() {
+    B = [];
+    for (let k = 0; k < K; k++) {
+      const row = [];
+      for (let j = 0; j < N; j++) row.push(randVal());
+      B.push(row);
+    }
+  }
+
+  function readInputs() {
+    K = Math.max(1, Math.min(8, parseInt(inputs.K.value, 10) || 1));
+    N = Math.max(1, Math.min(8, parseInt(inputs.N.value, 10) || 1));
+    inputs.K.value = K; inputs.N.value = N;
+    inputs.J.max = Math.max(0, N - 1);
+    J = parseInt(inputs.J.value, 10) || 0;
+    if (J < 0) J = 0;
+    if (J > N - 1) J = N - 1;
+    inputs.J.value = J;
+  }
+
+  function renderMatrix() {
+    const el = $('matB');
+    el.innerHTML = '';
+    for (let k = 0; k < K; k++) {
+      const tr = document.createElement('tr');
+      for (let j = 0; j < N; j++) {
+        const td = document.createElement('td');
+        td.dataset.k = k; td.dataset.j = j;
+        td.textContent = B[k][j];
+        if (j === J) td.classList.add('col');
+        tr.appendChild(td);
+      }
+      el.appendChild(tr);
+    }
+  }
+
+  function renderStrip(stripId, mode) {
+    const el = $(stripId);
+    el.innerHTML = '';
+    // plain: walk k outer, j inner → groups of N
+    // trans: walk j outer, k inner → groups of K
+    const outer = mode === 'plain' ? K : N;
+    const inner = mode === 'plain' ? N : K;
+    for (let o = 0; o < outer; o++) {
+      for (let i = 0; i < inner; i++) {
+        const k = mode === 'plain' ? o : i;
+        const j = mode === 'plain' ? i : o;
+        const addr = mode === 'plain' ? (k * N + j) : (j * K + k);
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.addr = addr;
+        cell.dataset.k = k; cell.dataset.j = j;
+        cell.innerHTML =
+          `<span class="v">${B[k][j]}</span>` +
+          `<span class="addr">[${addr}]</span>` +
+          `<span class="kj">${k},${j}</span>`;
+        if (j === J) cell.classList.add('col');
+        if (i === inner - 1 && o < outer - 1) cell.classList.add('group-end');
+        el.appendChild(cell);
+      }
+    }
+  }
+
+  function clearHighlights() {
+    document.querySelectorAll('.cell').forEach(c => c.classList.remove('active', 'prev'));
+    document.querySelectorAll('#matB td').forEach(td => td.classList.remove('active'));
+  }
+
+  function applyStep() {
+    clearHighlights();
+    if (kStep < 0) {
+      $('rdStep').textContent = '—';
+      $('rdVal').textContent = '—';
+      $('rdPlain').textContent = '—';
+      $('rdTrans').textContent = '—';
+      $('stridePlain').textContent = '—';
+      $('strideTrans').textContent = '—';
+      $('progressBar').style.width = '0%';
+      return;
+    }
+
+    const plainAddr = kStep * N + J;
+    const transAddr = J * K + kStep;
+
+    $('rdStep').textContent = `k=${kStep}, j=${J}`;
+    $('rdVal').textContent  = `${B[kStep][J]}`;
+    $('rdPlain').textContent = `${kStep}·${N}+${J} = ${plainAddr}`;
+    $('rdTrans').textContent = `${J}·${K}+${kStep} = ${transAddr}`;
+    $('progressBar').style.width = `${((kStep + 1) / K) * 100}%`;
+
+    const td = document.querySelector(`#matB td[data-k="${kStep}"][data-j="${J}"]`);
+    if (td) td.classList.add('active');
+
+    const cPlain = document.querySelector(`#stripPlain .cell[data-addr="${plainAddr}"]`);
+    const cTrans = document.querySelector(`#stripTrans .cell[data-addr="${transAddr}"]`);
+    if (cPlain) cPlain.classList.add('active');
+    if (cTrans) cTrans.classList.add('active');
+
+    if (prevK >= 0) {
+      const prevPlain = prevK * N + J;
+      const prevTrans = J * K + prevK;
+      const pP = document.querySelector(`#stripPlain .cell[data-addr="${prevPlain}"]`);
+      const pT = document.querySelector(`#stripTrans .cell[data-addr="${prevTrans}"]`);
+      if (pP) pP.classList.add('prev');
+      if (pT) pT.classList.add('prev');
+      $('stridePlain').textContent = `+${plainAddr - prevPlain}`;
+      $('strideTrans').textContent = `+${transAddr - prevTrans}`;
+    } else {
+      $('stridePlain').textContent = `— (k=0)`;
+      $('strideTrans').textContent = `— (k=0)`;
+    }
+  }
+
+  function next() {
+    if (kStep >= K - 1) { stopPlay(); return; }
+    prevK = kStep;
+    kStep++;
+    applyStep();
+  }
+  function prev() {
+    if (kStep <= -1) return;
+    kStep--;
+    prevK = kStep - 1;
+    applyStep();
+  }
+  function reset() {
+    stopPlay();
+    kStep = -1; prevK = -1;
+    applyStep();
+  }
+  function startPlay() {
+    if (kStep >= K - 1) { kStep = -1; prevK = -1; }
+    playing = true;
+    $('play').textContent = 'pause';
+    playTimer = setInterval(() => {
+      if (kStep >= K - 1) { stopPlay(); return; }
+      next();
+    }, 650);
+  }
+  function stopPlay() {
+    playing = false;
+    $('play').textContent = 'play';
+    if (playTimer) clearInterval(playTimer);
+    playTimer = null;
+  }
+
+  function rebuildAll(regenerate) {
+    stopPlay();
+    readInputs();
+    if (regenerate || B.length !== K || (B[0] && B[0].length !== N)) buildB();
+    kStep = -1; prevK = -1;
+    renderMatrix();
+    renderStrip('stripPlain', 'plain');
+    renderStrip('stripTrans', 'trans');
+    applyStep();
+  }
+
+  inputs.K.addEventListener('input', () => rebuildAll(true));
+  inputs.N.addEventListener('input', () => rebuildAll(true));
+  inputs.J.addEventListener('input', () => { readInputs(); rebuildAll(false); });
+  $('randomize').addEventListener('click', () => rebuildAll(true));
+  $('next').addEventListener('click', () => { stopPlay(); next(); });
+  $('prev').addEventListener('click', () => { stopPlay(); prev(); });
+  $('reset').addEventListener('click', reset);
+  $('play').addEventListener('click', () => { playing ? stopPlay() : startPlay(); });
+
+  rebuildAll(true);
+})();
+</script>
+</body>
+</html>
