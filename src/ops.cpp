@@ -60,6 +60,7 @@ void RMSNorm_1d(const float *IN_data, const float *W_data, float *OUT_data, int 
 namespace ops {
 
 // OUT[i, j] = sum_k A[i, k] * B[j, k]
+// Row-major computation. B needs to be un-transposed (natural layout).
 void matmul(const Tensor &A, const Tensor &B, Tensor &OUT) {
   assert(can_matmul(A, B));
 
@@ -80,7 +81,6 @@ void matmul(const Tensor &A, const Tensor &B, Tensor &OUT) {
 
   // do matmul across batches
   for (int b = 0; b < batch_size; ++b) {
-    // (B transposed version)
     matmul_2d(A_data + b * (M * K), B_data + b * (N * K), OUT_data + b * (M * N), M, K, N);
   }
 }
@@ -160,8 +160,8 @@ void softmax(const Tensor &IN, Tensor &OUT) {
   float *out_data = OUT.data_ptr();
   int last_dim = IN.dim(-1);
   for (int b = 0; b < batch_size; ++b) {
-    const float *row = in_data + b * last_dim;
-    float max_val = *std::max_element(row, row + last_dim);
+    const float *in_row_dim = in_data + b * last_dim;
+    float max_val = *std::max_element(in_row_dim, in_row_dim + last_dim);
 
     float sum_j = 0;
     for (int j = 0; j < last_dim; ++j) {
