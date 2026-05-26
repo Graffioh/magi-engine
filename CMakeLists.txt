@@ -26,6 +26,7 @@ add_executable(magi_tests
   tests/test_tensor.cpp
   tests/test_ops.cpp
   tests/test_mmap.cpp
+  tests/test_layers.cpp
   src/layers.cpp
   src/mmap.cpp
   src/ops.cpp
