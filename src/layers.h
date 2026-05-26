@@ -4,7 +4,7 @@
 
 class LinearLayer {
 private:
-  Tensor W; // (out_features, in_features)
+  Tensor W_; // (out_features, in_features)
 public:
   LinearLayer(Tensor W);
   void forward(const Tensor &IN, Tensor &OUT) const;
@@ -13,9 +13,9 @@ public:
 // SwiGLU MLP
 class MLP {
 private:
-  LinearLayer gate;
-  LinearLayer up;
-  LinearLayer down;
+  LinearLayer gate_;
+  LinearLayer up_;
+  LinearLayer down_;
 
 public:
   MLP(LinearLayer gate, LinearLayer up, LinearLayer down);

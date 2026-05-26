@@ -9,17 +9,17 @@
 
 static void print_shape(const Tensor &t) {
   std::cout << "  shape   = [";
-  for (int i = 0; i < t.get_rank(); ++i) {
-    std::cout << t.get_shape()[i];
-    if (i + 1 < t.get_rank())
+  for (int i = 0; i < t.rank(); ++i) {
+    std::cout << t.shape()[i];
+    if (i + 1 < t.rank())
       std::cout << ", ";
   }
   std::cout << "]\n";
 
   std::cout << "  strides = [";
-  for (int i = 0; i < t.get_rank(); ++i) {
-    std::cout << t.get_strides()[i];
-    if (i + 1 < t.get_rank())
+  for (int i = 0; i < t.rank(); ++i) {
+    std::cout << t.strides()[i];
+    if (i + 1 < t.rank())
       std::cout << ", ";
   }
   std::cout << "]\n";
@@ -27,7 +27,7 @@ static void print_shape(const Tensor &t) {
 
 static void print_data(const Tensor &t) {
   const float *p = t.data_ptr();
-  int n = t.total_dim();
+  int n = t.num_elements();
   std::cout << "  data    = [";
   for (int i = 0; i < n; ++i)
     std::cout << p[i] << (i + 1 < n ? ", " : "");
@@ -44,7 +44,7 @@ static void fill_random(Tensor &t, uint32_t seed = 42, float lo = -0.1f, float h
   std::mt19937 rng(seed);
   std::uniform_real_distribution<float> dist(lo, hi);
   float *p = t.data_ptr();
-  int n = t.total_dim();
+  int n = t.num_elements();
   for (int i = 0; i < n; ++i)
     p[i] = dist(rng);
 }

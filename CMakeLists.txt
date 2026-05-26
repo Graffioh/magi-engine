@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(magi_engine
   src/main.cpp
   src/layers.cpp
+  src/mmap.cpp
   src/ops.cpp
   src/tensor.cpp
 )
@@ -24,7 +25,9 @@ add_executable(magi_tests
   tests/test_main.cpp
   tests/test_tensor.cpp
   tests/test_ops.cpp
+  tests/test_mmap.cpp
   src/layers.cpp
+  src/mmap.cpp
   src/ops.cpp
   src/tensor.cpp
 )

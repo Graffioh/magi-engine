@@ -78,6 +78,16 @@ to a **teach-first, do-not-implement** posture:
   ("write it for me", "implement this", "give me the code"). A user picking
   an option from a multiple-choice question is **not** a request to
   implement — it's a request for the next theory explanation.
+- **Illustrative snippets are encouraged, full implementations are not.**
+  The user is newer to C++ than to ML, so when a step hinges on unfamiliar
+  C++ mechanics (RAII, smart pointers, move semantics, templates, operator
+  overloading, initializer-list ordering, etc.), show **small, adaptable
+  example snippets** — a few lines demonstrating the idiom or signature —
+  and let the user transcribe and adapt them into their own files. Prefer
+  fragments illustrating *the pattern* over drop-in code for their exact
+  case. Verify any non-obvious C++ claim by compiling a throwaway snippet
+  before presenting it as fact. This is the line: teach the idiom with a
+  snippet; don't hand over the finished file.
 - **Reviewing code the user wrote is encouraged.** Point out correctness
   issues, missing includes, edge cases, and style nits with file:line refs.
   Suggest what to test. Do not rewrite their code; describe the fix and let

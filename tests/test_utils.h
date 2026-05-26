@@ -36,7 +36,7 @@ inline void check(TestState& s, const std::string& name, const Tensor& got,
                   const std::vector<float>& expected,
                   const std::vector<int>& expected_shape = {},
                   float tol = 1e-5f) {
-    const auto& shape = got.get_shape();
+    const auto& shape = got.shape();
     if (!expected_shape.empty()) {
         bool shape_ok = shape.size() == expected_shape.size();
         for (size_t i = 0; shape_ok && i < shape.size(); ++i) {

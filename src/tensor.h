@@ -1,21 +1,32 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 
 class Tensor {
-    std::vector<float> data;
-    std::vector<int> shape;
-    std::vector<int> strides;
+private:
+    float *data_;
+    std::vector<int> shape_, strides_;
+    std::shared_ptr<void> owner_;
+
+    // strides tell how many elements to skip in the flat buffers, to advance one step along each axis
+    void compute_strides();
 
 public:
+    // we explicitly only allow moving, not copying (copying model weights can become a disaster x))
+    Tensor(const Tensor&) = delete;
+    Tensor& operator=(const Tensor&) = delete;
+    Tensor(Tensor&&) = default;
+    Tensor& operator=(Tensor&&) = default;
+
     Tensor(std::vector<int> shape);
 
-    const float* data_ptr() const { return data.data(); };
-    float* data_ptr() { return data.data(); };
+    const float* data_ptr() const { return data_; };
+    float* data_ptr() { return data_; };
 
-    const std::vector<int>& get_shape() const { return shape; }
-    int get_rank() const { return shape.size(); };
-    int dim(int axis) const { return shape[axis < 0 ? shape.size() + axis : axis]; }
-    int total_dim() const { int res = 1; for (int d : shape) res *= d; return res; }
-    const std::vector<int>& get_strides() const { return strides; }
+    const std::vector<int>& shape() const { return shape_; }
+    int rank() const { return shape_.size(); };
+    int dim(int axis) const { return shape_[axis < 0 ? shape_.size() + axis : axis]; }
+    int num_elements() const { int res = 1; for (int d : shape_) res *= d; return res; }
+    const std::vector<int>& strides() const { return strides_; }
 };

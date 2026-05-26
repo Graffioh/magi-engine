@@ -7,15 +7,15 @@
 namespace {
 
 bool can_matmul(const Tensor &A, const Tensor &B) {
-  if (A.get_rank() != B.get_rank()) {
+  if (A.rank() != B.rank()) {
     return false;
   }
 
-  if (A.get_rank() < 2 || B.get_rank() < 2) {
+  if (A.rank() < 2 || B.rank() < 2) {
     return false;
   }
 
-  for (int i = 0; i < A.get_rank() - 2; ++i) {
+  for (int i = 0; i < A.rank() - 2; ++i) {
     if (A.dim(i) != B.dim(i))
       return false;
   }
@@ -71,7 +71,7 @@ void matmul(const Tensor &A, const Tensor &B, Tensor &OUT) {
 
   // total batch size = product of all leading dims (everything before the last two)
   int batch_size = 1;
-  for (int i = 0; i + 2 < A.get_rank(); ++i) {
+  for (int i = 0; i + 2 < A.rank(); ++i) {
     batch_size *= A.dim(i);
   }
 
@@ -90,7 +90,7 @@ void matmul(const Tensor &A, const Tensor &B, Tensor &OUT) {
 void RMSNorm(const Tensor &IN, const Tensor &W, Tensor &OUT, float eps) {
   int hidden_dim = IN.dim(-1);
   int batch_size = 1;
-  for (int i = 0; i + 1 < IN.get_rank(); ++i) {
+  for (int i = 0; i + 1 < IN.rank(); ++i) {
     batch_size *= IN.dim(i);
   }
 
@@ -106,44 +106,44 @@ void RMSNorm(const Tensor &IN, const Tensor &W, Tensor &OUT, float eps) {
 
 // SiLU(x) = x * sigmoid(x) = x / (1 + e^(-x))
 void SiLU(const Tensor &IN, Tensor &OUT) {
-  assert(IN.get_shape() == OUT.get_shape());
+  assert(IN.shape() == OUT.shape());
 
   const float *in_data = IN.data_ptr();
   float *out_data = OUT.data_ptr();
 
-  int total_dim = IN.total_dim();
+  int n = IN.num_elements();
 
-  for (int i = 0; i < total_dim; ++i) {
+  for (int i = 0; i < n; ++i) {
     out_data[i] = in_data[i] / (1.0f + expf(-in_data[i]));
   }
 }
 
 // OUT[i] = A[i] + B[i]   (elementwise)
 void add(const Tensor &A, const Tensor &B, Tensor &OUT) {
-  assert(A.get_shape() == B.get_shape());
-  assert(A.get_shape() == OUT.get_shape());
+  assert(A.shape() == B.shape());
+  assert(A.shape() == OUT.shape());
 
-  int total_dim = A.total_dim();
+  int n = A.num_elements();
 
   const float *a_data = A.data_ptr();
   const float *b_data = B.data_ptr();
   float *out_data = OUT.data_ptr();
-  for (int i = 0; i < total_dim; ++i) {
+  for (int i = 0; i < n; ++i) {
     out_data[i] = a_data[i] + b_data[i];
   }
 }
 
 // OUT[i] = A[i] * B[i]   (elementwise / Hadamard product)
 void mul(const Tensor &A, const Tensor &B, Tensor &OUT) {
-  assert(A.get_shape() == B.get_shape());
-  assert(A.get_shape() == OUT.get_shape());
+  assert(A.shape() == B.shape());
+  assert(A.shape() == OUT.shape());
 
-  int total_dim = A.total_dim();
+  int n = A.num_elements();
 
   const float *a_data = A.data_ptr();
   const float *b_data = B.data_ptr();
   float *out_data = OUT.data_ptr();
-  for (int i = 0; i < total_dim; ++i) {
+  for (int i = 0; i < n; ++i) {
     out_data[i] = a_data[i] * b_data[i];
   }
 }
@@ -152,7 +152,7 @@ void mul(const Tensor &A, const Tensor &B, Tensor &OUT) {
 // softmax(IN)_i = e^(IN[i] - m) / sum_j e^(IN[j] - m)   (along last dim)
 void softmax(const Tensor &IN, Tensor &OUT) {
   int batch_size = 1;
-  for (int i = 0; i + 1 < IN.get_rank(); ++i) {
+  for (int i = 0; i + 1 < IN.rank(); ++i) {
     batch_size *= IN.dim(i);
   }
 

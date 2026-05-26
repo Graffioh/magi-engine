@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>mmap & model loading — visualization</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #141823;
+    --panel-2: #1c2130;
+    --border: #2a3142;
+    --border-soft: #232a3a;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --dim: #5c6478;
+    --accent: #7cc4ff;
+    --accent-2: #f0a35a;
+    --good: #74d99f;
+    --bad: #ff7676;
+    --c0: #7cc4ff;
+    --c1: #f0a35a;
+    --c2: #74d99f;
+    --c3: #c099ff;
+    --c4: #ff7eb6;
+    --c5: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(124,196,255,0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(240,163,90,0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  header { padding: 28px 40px 8px; border-bottom: 1px solid var(--border-soft); }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.2px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; max-width: 820px; }
+  main { padding: 24px 40px 80px; max-width: 1320px; margin: 0 auto; }
+  section { margin-bottom: 34px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 1.6px;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+
+  .grid-2 { display: grid; gap: 22px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 1020px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.55; }
+  .footnote code { color: var(--accent); background: rgba(124,196,255,0.08); padding: 1px 5px; border-radius: 3px; }
+
+  .mono { font-family: ui-monospace, SF Mono, Menlo, monospace; }
+
+  /* ============================================================ */
+  /* SECTION 1: read() vs mmap() data flow                        */
+  /* ============================================================ */
+  .flow {
+    display: grid;
+    grid-template-rows: auto auto auto auto;
+    gap: 14px;
+    align-items: center;
+  }
+  .flow .stage {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: ui-monospace, monospace; font-size: 13px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+  }
+  .flow .stage .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .flow .stage .val { font-weight: 700; }
+  .flow .arrow {
+    text-align: center; color: var(--muted); font-size: 18px; line-height: 1;
+  }
+  .flow .arrow .note { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; font-family: ui-sans-serif, system-ui; font-style: italic; }
+
+  .flow .stage.copy { border-color: rgba(255,118,118,0.45); background: rgba(255,118,118,0.06); }
+  .flow .stage.zero { border-color: rgba(116,217,159,0.45); background: rgba(116,217,159,0.06); }
+
+  .stat-row { display: flex; gap: 16px; margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 8px; padding: 8px 12px; flex: 1; }
+  .stat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat .v { font-size: 14px; font-weight: 700; margin-top: 2px; }
+  .stat .v.bad { color: var(--bad); }
+  .stat .v.good { color: var(--good); }
+
+  /* ============================================================ */
+  /* SECTION 2: GGUF file layout + Tensor views                   */
+  /* ============================================================ */
+  .file-strip {
+    position: relative;
+    height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    display: flex;
+    margin-top: 8px;
+  }
+  .file-strip .seg {
+    height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    cursor: pointer;
+    transition: filter 100ms ease, transform 100ms ease;
+    color: #0b1320;
+    position: relative;
+  }
+  .file-strip .seg:last-child { border-right: 0; }
+  .file-strip .seg:hover { filter: brightness(1.1); }
+  .file-strip .seg.active { box-shadow: inset 0 0 0 3px var(--text); }
+  .file-strip .seg .nm { z-index: 2; }
+  .file-strip .seg.hdr { background: #4a5468; color: var(--text); }
+
+  .file-axis {
+    display: flex; justify-content: space-between;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: var(--muted); margin-top: 4px;
+  }
+
+  .obj-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 18px; }
+  @media (max-width: 920px) { .obj-row { grid-template-columns: 1fr; } }
+  .obj {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+    transition: border-color 150ms ease, transform 100ms ease;
+  }
+  .obj.highlight { border-color: var(--text); transform: translateY(-2px); }
+  .obj .title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
+  .obj .field { margin: 3px 0; }
+  .obj .field .k { color: var(--muted); }
+  .obj .field .v { color: var(--text); }
+  .obj .field .v.ptr { color: var(--accent); }
+  .obj .field .v.sz { color: var(--accent-2); }
+  .obj .field .v.shape { color: var(--c2); }
+
+  .mf-obj {
+    background: var(--panel-2);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-top: 16px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+  }
+  .mf-obj .title { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
+  .mf-obj .field { margin: 3px 0; }
+  .mf-obj .field .k { color: var(--muted); }
+  .mf-obj .field .v.ptr { color: var(--accent); }
+  .mf-obj .field .v.sz { color: var(--accent-2); }
+
+  .legend-row { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .legend-row .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-row .sw { width: 14px; height: 12px; border-radius: 3px; }
+
+  .arrow-zone {
+    height: 22px;
+    position: relative;
+    margin-top: 6px;
+    margin-bottom: 2px;
+  }
+  .arrow-zone svg { width: 100%; height: 100%; display: block; }
+
+  /* ============================================================ */
+  /* SECTION 3: shared_ptr lifetime / refcount                    */
+  /* ============================================================ */
+  .lifetime-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 22px; }
+  @media (max-width: 920px) { .lifetime-grid { grid-template-columns: 1fr; } }
+
+  .tensor-list { display: flex; flex-direction: column; gap: 10px; }
+  .tensor-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: ui-monospace, monospace; font-size: 13px;
+    transition: opacity 200ms ease, filter 200ms ease;
+  }
+  .tensor-card.dead {
+    opacity: 0.35;
+    filter: grayscale(0.7);
+  }
+  .tensor-card .info { display: flex; flex-direction: column; gap: 3px; }
+  .tensor-card .nm { font-weight: 700; }
+  .tensor-card .meta { font-size: 11px; color: var(--muted); }
+  .tensor-card button.kill {
+    background: transparent; color: var(--bad);
+    border: 1px solid rgba(255,118,118,0.4); border-radius: 6px;
+    padding: 5px 11px; font-family: inherit; font-size: 12px; cursor: pointer;
+    transition: background 100ms ease;
+  }
+  .tensor-card button.kill:hover { background: rgba(255,118,118,0.15); }
+  .tensor-card button.kill:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .refcount-display {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 18px;
+    font-family: ui-monospace, monospace;
+    text-align: center;
+  }
+  .refcount-display .label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.4px;
+  }
+  .refcount-display .count {
+    font-size: 60px; font-weight: 800; line-height: 1; margin: 14px 0 6px;
+    color: var(--good); transition: color 200ms ease;
+  }
+  .refcount-display .count.zero { color: var(--bad); }
+  .refcount-display .status {
+    font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 32px;
+  }
+  .refcount-display .status .alive { color: var(--good); }
+  .refcount-display .status .dead { color: var(--bad); }
+
+  .reset-btn {
+    background: var(--accent); color: #0b1320; font-weight: 700;
+    border: 0; padding: 9px 18px; border-radius: 7px; cursor: pointer;
+    font-size: 13px; font-family: inherit; margin-top: 14px;
+    transition: transform 100ms ease;
+  }
+  .reset-btn:hover { transform: translateY(-1px); }
+
+  /* ============================================================ */
+  /* SECTION 1b: demand paging (page grid)                        */
+  /* ============================================================ */
+  .va-bar { margin: 6px 0 4px; }
+  .va-label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px;
+  }
+  .page-owners {
+    display: grid;
+    grid-template-columns: repeat(32, 1fr);
+    gap: 3px;
+    height: 6px;
+    margin-bottom: 6px;
+  }
+  .page-owners > div { border-radius: 2px; opacity: 0.55; }
+  .page-grid {
+    display: grid;
+    grid-template-columns: repeat(32, 1fr);
+    gap: 3px;
+  }
+  .page {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px dashed var(--dim);
+    transition: background 220ms ease, border-color 220ms ease, transform 200ms ease, box-shadow 220ms ease;
+  }
+  .page.resident {
+    background: var(--page-color, var(--good));
+    border: 1px solid transparent;
+    box-shadow: 0 0 12px -2px var(--page-color, var(--good));
+  }
+  .page.evicted {
+    background: rgba(255,118,118,0.08);
+    border: 1px dashed rgba(255,118,118,0.55);
+    box-shadow: none;
+  }
+  .page.fault-pulse { animation: pulseFault 380ms ease; }
+  @keyframes pulseFault {
+    0%   { transform: scale(0.55); }
+    55%  { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+  .page-axis {
+    display: flex; justify-content: space-between;
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--muted); margin-top: 6px;
+  }
+  .page-legend {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    margin-top: 14px; font-size: 12px; color: var(--muted);
+  }
+  .page-legend .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .page-sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+  .page-sw.unmapped { border: 1px dashed var(--dim); background: transparent; }
+  .page-sw.resident { background: var(--good); }
+  .page-sw.evicted  { background: rgba(255,118,118,0.10); border: 1px dashed rgba(255,118,118,0.55); }
+
+  .page-stats { display: flex; gap: 12px; margin-top: 14px; }
+  .page-stats .stat { flex: 1; }
+
+  .page-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .page-btn {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 8px 13px; font-family: inherit; font-size: 12px; cursor: pointer;
+    transition: transform 100ms ease, background 100ms ease, border-color 100ms ease;
+  }
+  .page-btn:hover { transform: translateY(-1px); background: var(--border-soft); }
+  .page-btn[data-access="0"] { border-color: rgba(124,196,255,0.45); }
+  .page-btn[data-access="1"] { border-color: rgba(240,163,90,0.45); }
+  .page-btn[data-access="2"] { border-color: rgba(116,217,159,0.45); }
+  .page-btn.pressure { border-color: rgba(255,118,118,0.45); color: var(--bad); }
+  .page-btn.reset    { border-color: rgba(124,196,255,0.45); color: var(--accent); margin-left: auto; }
+
+  /* ============================================================ */
+  /* code blocks                                                  */
+  /* ============================================================ */
+  pre.code {
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: 12px 14px; font-family: ui-monospace, monospace; font-size: 12px;
+    overflow-x: auto; margin: 12px 0 0;
+  }
+  pre.code .kw { color: #c099ff; }
+  pre.code .ty { color: #8ed1ff; }
+  pre.code .num { color: #f0a35a; }
+  pre.code .c { color: var(--muted); font-style: italic; }
+  pre.code .str { color: var(--good); }
+
+  .callout {
+    background: rgba(124,196,255,0.06);
+    border: 1px solid rgba(124,196,255,0.25);
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text);
+    margin-top: 12px;
+  }
+  .callout strong { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>mmap &amp; model loading — visualization</h1>
+  <p>
+    Loading model weights with <code>mmap</code> instead of <code>read()</code> is the trick that lets
+    <a href="https://github.com/ggerganov/llama.cpp" style="color: var(--accent);">llama.cpp</a>
+    "load" a 7B model in milliseconds: the call returns as soon as the kernel has set up page tables,
+    and pages fault in lazily on first touch.
+    Three things to understand: why mmap is fast (no user-space copy, no eager I/O),
+    how the file maps to tensor views (offsets into one shared backing buffer),
+    and how lifetimes are tied together (a <code>shared_ptr</code> keeps the mapping alive
+    as long as any tensor still references it).
+  </p>
+</header>
+
+<main>
+
+  <!-- ============================================================ -->
+  <!-- SECTION 1: read() vs mmap()                                  -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>why mmap — the data flow comparison</h2>
+    <div class="grid-2">
+
+      <div class="panel">
+        <div class="mono" style="color: var(--bad); font-weight: 700; margin-bottom: 10px;">read() — eager copy</div>
+        <div class="flow">
+          <div class="stage">
+            <div><span class="lbl">disk</span><div class="val">weights.gguf · 4 GB</div></div>
+          </div>
+          <div class="arrow">↓ <span class="note">kernel reads pages into page cache</span></div>
+          <div class="stage copy">
+            <div><span class="lbl">page cache (kernel)</span><div class="val">4 GB cached</div></div>
+          </div>
+          <div class="arrow">↓ <span class="note">memcpy from kernel buffer to user buffer</span></div>
+          <div class="stage copy">
+            <div><span class="lbl">your process memory</span><div class="val">4 GB user buffer</div></div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="stage">
+            <div><span class="lbl">your code reads</span><div class="val">float* weights = ...</div></div>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><div class="k">total RAM</div><div class="v bad">~8 GB</div></div>
+          <div class="stat"><div class="k">load time</div><div class="v bad">seconds</div></div>
+          <div class="stat"><div class="k">copies</div><div class="v bad">1 (extra)</div></div>
+        </div>
+        <p class="footnote">Every byte travels: disk → page cache → user buffer. Two physical copies in RAM. The load syscall doesn't return until the whole file is buffered.</p>
+      </div>
+
+      <div class="panel">
+        <div class="mono" style="color: var(--good); font-weight: 700; margin-bottom: 10px;">mmap() — zero copy</div>
+        <div class="flow">
+          <div class="stage">
+            <div><span class="lbl">disk</span><div class="val">weights.gguf · 4 GB</div></div>
+          </div>
+          <div class="arrow">↓ <span class="note">page tables set up — no I/O yet</span></div>
+          <div class="stage zero">
+            <div><span class="lbl">page cache (kernel)</span><div class="val">populated lazily on access</div></div>
+          </div>
+          <div class="arrow">↓ <span class="note">your pointer IS the page cache</span></div>
+          <div class="stage zero">
+            <div><span class="lbl">your process memory</span><div class="val">virtual mapping (no copy)</div></div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="stage">
+            <div><span class="lbl">your code reads</span><div class="val">float* weights = mmap_base + offset</div></div>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><div class="k">total RAM</div><div class="v good">~4 GB (shared)</div></div>
+          <div class="stat"><div class="k">load time</div><div class="v good">milliseconds</div></div>
+          <div class="stat"><div class="k">copies</div><div class="v good">0</div></div>
+        </div>
+        <p class="footnote">mmap returns immediately after building page tables. Pages fault in on first access. Multiple processes mapping the same file share physical pages.</p>
+      </div>
+
+    </div>
+    <div class="callout">
+      <strong>Bonus:</strong> mmap'd pages are file-backed, so under memory pressure the kernel drops them
+      (re-faulting from disk later) instead of swapping. read()-loaded buffers are anonymous memory — they go to swap, which is slow and duplicates the file on disk.
+    </div>
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!-- SECTION 1b: demand paging — interactive                      -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>demand paging — what "lazy load" actually does</h2>
+    <div class="panel">
+      <p class="footnote" style="margin-top: 0; margin-bottom: 14px;">
+        <code>mmap()</code> returned in microseconds, but <em>no bytes are in RAM yet</em>.
+        The kernel only installed page-table entries marking the range as valid. The first time your code reads from
+        a page, the CPU traps to the kernel — a <strong>page fault</strong> — and the kernel pulls that 4 KB page
+        from disk into the page cache. Subsequent reads to the same page hit DRAM directly.
+        Click a tensor to "run a forward pass" through it and watch its pages fault in.
+      </p>
+
+      <div class="va-bar">
+        <div class="va-label">Virtual address space — 32 page-groups mapped over weights.gguf (4 GB)</div>
+        <div class="page-owners" id="pageOwners"></div>
+        <div class="page-grid" id="pageGrid"></div>
+        <div class="page-axis"><span>page 0</span><span>page 31</span></div>
+      </div>
+
+      <div class="page-legend">
+        <div class="chip"><span class="page-sw unmapped"></span>PTE only — not in RAM</div>
+        <div class="chip"><span class="page-sw resident"></span>resident in page cache</div>
+        <div class="chip"><span class="page-sw evicted"></span>evicted under pressure (will re-fault)</div>
+      </div>
+
+      <div class="page-stats">
+        <div class="stat"><div class="k">resident RSS</div><div class="v" id="rssVal">0 MB</div></div>
+        <div class="stat"><div class="k">page faults</div><div class="v" id="faultVal">0</div></div>
+        <div class="stat"><div class="k">resident pages</div><div class="v" id="residentVal">0 / 32</div></div>
+      </div>
+
+      <div class="page-controls">
+        <button class="page-btn" data-access="0">access tok_embeddings</button>
+        <button class="page-btn" data-access="1">access attn.wq</button>
+        <button class="page-btn" data-access="2">access ffn.gate</button>
+        <button class="page-btn pressure" data-pressure>memory pressure ↓ (evict cold half)</button>
+        <button class="page-btn reset" data-reset>↻ reset</button>
+      </div>
+
+      <div class="callout">
+        <strong>Why this matters for inference:</strong> only weights you actually touch get loaded.
+        If a layer is skipped, its pages never fault in. Under RAM pressure the kernel drops cold file-backed
+        pages — no swap, no copy, just a re-fault from disk if you read them again. There is no cache-management
+        code on your side: the OS does it.
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!-- SECTION 2: GGUF file layout + tensor views                   -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>a GGUF file mapped into memory — tensors are views, not copies</h2>
+    <div class="panel">
+      <p class="footnote" style="margin-top:0; margin-bottom: 14px;">
+        One <code>mmap()</code> call maps the entire file. <code>MappedFile</code> holds the (base, size) pair for the whole mapping.
+        Each <code>Tensor</code> stores a <em>raw pointer into the mapping</em> (base + offset) plus a <code>shared_ptr&lt;MappedFile&gt;</code> in its <code>owner_</code> field.
+        Tensors don't copy bytes — they're typed views over the kernel's page cache.
+      </p>
+
+      <div class="file-strip" id="fileStrip">
+        <div class="seg hdr" style="flex: 0 0 8%"><span class="nm">header</span></div>
+        <div class="seg" data-tensor="0" style="flex: 0 0 28%; background: var(--c0);"><span class="nm">tok_embeddings.weight</span></div>
+        <div class="seg" data-tensor="1" style="flex: 0 0 22%; background: var(--c1);"><span class="nm">attn.wq</span></div>
+        <div class="seg" data-tensor="2" style="flex: 0 0 18%; background: var(--c2);"><span class="nm">ffn.gate</span></div>
+        <div class="seg" data-tensor="3" style="flex: 0 0 14%; background: var(--c3);"><span class="nm">norm.weight</span></div>
+        <div class="seg" data-tensor="4" style="flex: 0 0 10%; background: var(--c4);"><span class="nm">output.weight</span></div>
+      </div>
+      <div class="file-axis">
+        <span>offset 0</span>
+        <span id="fileEnd">offset N</span>
+      </div>
+
+      <div class="mf-obj">
+        <div class="title">MappedFile (1 instance, refcount = 5)</div>
+        <div class="field"><span class="k">data_  = </span><span class="v ptr mono">0x7f3a00000000</span><span class="k"> // page-aligned base of the whole file</span></div>
+        <div class="field"><span class="k">size_  = </span><span class="v sz mono">4'294'967'296</span><span class="k"> // bytes; required by munmap on destruction</span></div>
+      </div>
+
+      <div class="arrow-zone">
+        <svg viewBox="0 0 1000 22" preserveAspectRatio="none">
+          <line x1="170" y1="0" x2="170" y2="22" stroke="#7cc4ff" stroke-width="2" stroke-dasharray="3,3"/>
+          <line x1="365" y1="0" x2="365" y2="22" stroke="#f0a35a" stroke-width="2" stroke-dasharray="3,3"/>
+          <line x1="550" y1="0" x2="550" y2="22" stroke="#74d99f" stroke-width="2" stroke-dasharray="3,3"/>
+          <line x1="710" y1="0" x2="710" y2="22" stroke="#c099ff" stroke-width="2" stroke-dasharray="3,3"/>
+          <line x1="850" y1="0" x2="850" y2="22" stroke="#ff7eb6" stroke-width="2" stroke-dasharray="3,3"/>
+        </svg>
+      </div>
+
+      <div class="obj-row" id="tensorObjs">
+        <div class="obj" data-tensor="0">
+          <div class="title" style="color: var(--c0);">Tensor — tok_embeddings.weight</div>
+          <div class="field"><span class="k">data   = </span><span class="v ptr">base + 0x0080</span></div>
+          <div class="field"><span class="k">shape  = </span><span class="v shape">[32000, 4096]</span></div>
+          <div class="field"><span class="k">dtype  = </span><span class="v">f16</span></div>
+          <div class="field"><span class="k">owner_ </span><span class="k">→ shared_ptr&lt;MappedFile&gt;</span></div>
+        </div>
+        <div class="obj" data-tensor="1">
+          <div class="title" style="color: var(--c1);">Tensor — attn.wq</div>
+          <div class="field"><span class="k">data   = </span><span class="v ptr">base + 0x12'4080</span></div>
+          <div class="field"><span class="k">shape  = </span><span class="v shape">[4096, 4096]</span></div>
+          <div class="field"><span class="k">dtype  = </span><span class="v">f16</span></div>
+          <div class="field"><span class="k">owner_ </span><span class="k">→ shared_ptr&lt;MappedFile&gt;</span></div>
+        </div>
+        <div class="obj" data-tensor="2">
+          <div class="title" style="color: var(--c2);">Tensor — ffn.gate</div>
+          <div class="field"><span class="k">data   = </span><span class="v ptr">base + 0x1E'4080</span></div>
+          <div class="field"><span class="k">shape  = </span><span class="v shape">[11008, 4096]</span></div>
+          <div class="field"><span class="k">dtype  = </span><span class="v">f16</span></div>
+          <div class="field"><span class="k">owner_ </span><span class="k">→ shared_ptr&lt;MappedFile&gt;</span></div>
+        </div>
+      </div>
+
+      <p class="footnote" style="margin-top: 16px;">
+        Hover the colored segments above to highlight matching tensor objects.
+        Note that every <code>Tensor::owner_</code> points to the <em>same</em> <code>MappedFile</code> — they share its refcount.
+      </p>
+
+      <div class="legend-row">
+        <div class="chip"><span class="sw" style="background: #4a5468"></span>GGUF header (magic, version, metadata, tensor info)</div>
+        <div class="chip"><span class="sw" style="background: var(--c0)"></span>tensor data — referenced by views, never copied</div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!-- SECTION 3: shared_ptr refcount / lifetime                    -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>lifetime — when is the mapping released?</h2>
+    <div class="panel">
+      <p class="footnote" style="margin-top: 0; margin-bottom: 14px;">
+        Each <code>Tensor::owner_</code> holds a <code>shared_ptr</code> referencing the same <code>MappedFile</code>.
+        The mapping is alive while the refcount is greater than zero. Destroy tensors below — when the last one dies,
+        the <code>MappedFile</code> destructor runs and <code>munmap</code> releases the region.
+      </p>
+
+      <div class="lifetime-grid">
+        <div class="tensor-list" id="tensorList">
+          <!-- populated by JS -->
+        </div>
+
+        <div>
+          <div class="refcount-display">
+            <div class="label">MappedFile refcount</div>
+            <div class="count" id="refcount">3</div>
+            <div class="status" id="refStatus"><span class="alive">mapping is alive — pages remain accessible</span></div>
+          </div>
+          <button class="reset-btn" id="resetBtn">↻ recreate all tensors</button>
+          <pre class="code" style="margin-top: 16px;"><span class="c">// what happens behind the scenes</span>
+<span class="ty">auto</span> mf = std::make_shared&lt;<span class="ty">MappedFile</span>&gt;(<span class="str">"weights.gguf"</span>);
+
+<span class="ty">Tensor</span> t1 = Tensor::from_mapped(mf, off1, shape1);
+<span class="ty">Tensor</span> t2 = Tensor::from_mapped(mf, off2, shape2);
+<span class="ty">Tensor</span> t3 = Tensor::from_mapped(mf, off3, shape3);
+<span class="c">// refcount = 3 — three tensors + mf itself? no:</span>
+<span class="c">// mf is one ref; each tensor holds its own ref via owner_</span>
+<span class="c">// (mf going out of scope here would not unmap)</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!-- SECTION 4: the architectural change needed                   -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>where this lands in the codebase</h2>
+    <div class="panel">
+      <p class="footnote" style="margin-top: 0;">
+        The current <code>Tensor</code> class holds <code>std::vector&lt;float&gt; data_</code> — which always heap-allocates and always owns.
+        To support mmap-backed views, <code>data_</code> needs to become a raw pointer, with <code>owner_</code> controlling its lifetime.
+        One field, one lifetime model — same shape works for owned tensors, mmap views, and (eventually) GPU buffers.
+      </p>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div>
+          <div class="mono" style="font-size: 12px; color: var(--bad); margin-bottom: 6px;">today — owned only</div>
+<pre class="code"><span class="kw">class</span> <span class="ty">Tensor</span> {
+    std::vector&lt;<span class="ty">float</span>&gt; data_;     <span class="c">// owns a heap buffer</span>
+    std::vector&lt;<span class="ty">int</span>&gt; shape_, strides_;
+    std::shared_ptr&lt;<span class="ty">void</span>&gt; owner_;    <span class="c">// dead field</span>
+};</pre>
+        </div>
+        <div>
+          <div class="mono" style="font-size: 12px; color: var(--good); margin-bottom: 6px;">target — view-friendly</div>
+<pre class="code"><span class="kw">class</span> <span class="ty">Tensor</span> {
+    <span class="ty">float</span>* data_ = <span class="kw">nullptr</span>;       <span class="c">// points anywhere</span>
+    std::vector&lt;<span class="ty">int</span>&gt; shape_, strides_;
+    std::shared_ptr&lt;<span class="ty">void</span>&gt; owner_;    <span class="c">// keeps data_ valid</span>
+};</pre>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>PyTorch parallel:</strong> their <code>Storage</code> is roughly your <code>MappedFile</code>-or-heap-buffer;
+        <code>Tensor</code> is a typed view (shape, strides, offset, dtype) into a <code>Storage</code>.
+        Multiple tensors share one storage. Slicing is free — child tensors copy the <code>shared_ptr</code>, not the bytes.
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!-- SECTION 5: references                                        -->
+  <!-- ============================================================ -->
+  <section>
+    <h2>references — llama.cpp</h2>
+    <div class="panel">
+      <p class="footnote" style="margin-top: 0;">
+        The pattern modeled here is lifted almost directly from <strong>llama.cpp</strong>.
+        Its <code>llama_mmap</code> class wraps one <code>mmap()</code> over the GGUF file;
+        every tensor's <code>data</code> pointer is just <em>mmap base + offset</em>, and the mapping
+        outlives the tensors via shared ownership — same idea, slightly different plumbing.
+      </p>
+      <ul class="footnote" style="margin-top: 10px; padding-left: 22px; line-height: 1.9;">
+        <li>
+          <a href="https://github.com/ggerganov/llama.cpp/pull/613" style="color: var(--accent);">PR #613 — "Use mmap for loading models"</a>
+          (Justine Tunney, March 2023). The original change that took load times from seconds to milliseconds.
+          The PR description is itself a great primer on why mmap wins here.
+        </li>
+        <li>
+          <a href="https://github.com/ggerganov/llama.cpp/blob/master/src/llama-mmap.cpp" style="color: var(--accent);"><code>src/llama-mmap.cpp</code></a>
+          — current implementation of <code>llama_mmap</code> / <code>llama_mlock</code>
+          (with the Windows <code>MapViewOfFile</code> and POSIX <code>mmap</code> branches side by side).
+        </li>
+        <li>
+          <a href="https://github.com/ggerganov/llama.cpp/blob/master/src/llama-model-loader.cpp" style="color: var(--accent);"><code>src/llama-model-loader.cpp</code></a>
+          — where the GGUF file is opened, mapped, and tensor metadata is wired up to offsets in the mapping.
+        </li>
+        <li>
+          <a href="https://github.com/ggerganov/ggml/blob/master/docs/gguf.md" style="color: var(--accent);">GGUF format spec</a>
+          — the on-disk layout (header + metadata + tensor table + tensor data) that makes "mmap + offset" sufficient.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ----- SECTION 1b: demand paging demo -----
+  const PAGES = 32;
+  // page ranges are [start, end) — chosen to roughly mirror Section 2's file strip
+  const tensorPageMap = [
+    { id: 0, name: 'tok_embeddings', start: 1,  end: 10, color: '#7cc4ff' }, // 9 pages
+    { id: 1, name: 'attn.wq',        start: 10, end: 17, color: '#f0a35a' }, // 7 pages
+    { id: 2, name: 'ffn.gate',       start: 17, end: 23, color: '#74d99f' }, // 6 pages
+    // pages 23..27 (norm.weight, c3) and 27..32 (output.weight, c4) — shown but no button
+    { id: -1, name: 'norm.weight',   start: 23, end: 27, color: '#c099ff' },
+    { id: -1, name: 'output.weight', start: 27, end: 32, color: '#ff7eb6' },
+  ];
+  const HEADER_COLOR = '#4a5468';
+  const MB_PER_PAGE = 128; // 4 GB / 32 page-groups
+
+  function ownerOf(idx) {
+    if (idx === 0) return { color: HEADER_COLOR };
+    return tensorPageMap.find(t => idx >= t.start && idx < t.end);
+  }
+
+  const pageGridEl   = document.getElementById('pageGrid');
+  const pageOwnersEl = document.getElementById('pageOwners');
+  const rssEl        = document.getElementById('rssVal');
+  const faultEl      = document.getElementById('faultVal');
+  const residentEl   = document.getElementById('residentVal');
+
+  let pageState  = new Array(PAGES).fill('unmapped'); // 'unmapped' | 'resident' | 'evicted'
+  let lastAccess = new Array(PAGES).fill(0);
+  let accessTick = 0;
+  let faultCount = 0;
+
+  function buildGrid() {
+    pageGridEl.innerHTML = '';
+    pageOwnersEl.innerHTML = '';
+    for (let i = 0; i < PAGES; i++) {
+      const owner = ownerOf(i) || { color: '#3a3f4f' };
+      const obar = document.createElement('div');
+      obar.style.background = owner.color;
+      pageOwnersEl.appendChild(obar);
+
+      const cell = document.createElement('div');
+      cell.className = 'page';
+      cell.dataset.idx = i;
+      cell.style.setProperty('--page-color', owner.color);
+      pageGridEl.appendChild(cell);
+    }
+  }
+
+  function refreshStats() {
+    const cells = pageGridEl.children;
+    let resident = 0;
+    for (let i = 0; i < PAGES; i++) {
+      cells[i].classList.remove('resident', 'evicted');
+      if (pageState[i] === 'resident') { cells[i].classList.add('resident'); resident++; }
+      if (pageState[i] === 'evicted')  { cells[i].classList.add('evicted'); }
+    }
+    const mb = resident * MB_PER_PAGE;
+    rssEl.textContent = mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb + ' MB';
+    faultEl.textContent = faultCount;
+    residentEl.textContent = `${resident} / ${PAGES}`;
+  }
+
+  function pulse(cell) {
+    cell.classList.remove('fault-pulse');
+    void cell.offsetWidth; // restart animation
+    cell.classList.add('fault-pulse');
+  }
+
+  async function accessTensor(tensorIdx) {
+    const t = tensorPageMap[tensorIdx];
+    for (let p = t.start; p < t.end; p++) {
+      const cell = pageGridEl.children[p];
+      if (pageState[p] !== 'resident') {
+        faultCount++;
+        pageState[p] = 'resident';
+      }
+      lastAccess[p] = ++accessTick;
+      refreshStats();
+      pulse(cell);
+      await new Promise(r => setTimeout(r, 75));
+    }
+  }
+
+  function applyPressure() {
+    const resident = [];
+    for (let i = 0; i < PAGES; i++) if (pageState[i] === 'resident') resident.push(i);
+    resident.sort((a, b) => lastAccess[a] - lastAccess[b]);
+    const toEvict = resident.slice(0, Math.ceil(resident.length / 2));
+    for (const p of toEvict) pageState[p] = 'evicted';
+    refreshStats();
+  }
+
+  function resetPages() {
+    pageState  = new Array(PAGES).fill('unmapped');
+    lastAccess = new Array(PAGES).fill(0);
+    accessTick = 0;
+    faultCount = 0;
+    refreshStats();
+  }
+
+  document.querySelectorAll('.page-btn[data-access]').forEach(btn => {
+    btn.addEventListener('click', () => accessTensor(parseInt(btn.dataset.access, 10)));
+  });
+  document.querySelector('.page-btn[data-pressure]').addEventListener('click', applyPressure);
+  document.querySelector('.page-btn[data-reset]').addEventListener('click', resetPages);
+
+  buildGrid();
+  refreshStats();
+
+
+  // ----- SECTION 2: highlight matching tensor on file-strip hover -----
+  const segs = document.querySelectorAll('.file-strip .seg[data-tensor]');
+  const objs = document.querySelectorAll('#tensorObjs .obj');
+
+  function highlight(idx) {
+    segs.forEach(s => s.classList.toggle('active', s.dataset.tensor === String(idx)));
+    objs.forEach(o => o.classList.toggle('highlight', o.dataset.tensor === String(idx)));
+  }
+  function clearHighlight() {
+    segs.forEach(s => s.classList.remove('active'));
+    objs.forEach(o => o.classList.remove('highlight'));
+  }
+  segs.forEach(s => {
+    s.addEventListener('mouseenter', () => highlight(s.dataset.tensor));
+    s.addEventListener('mouseleave', clearHighlight);
+  });
+  objs.forEach(o => {
+    o.addEventListener('mouseenter', () => highlight(o.dataset.tensor));
+    o.addEventListener('mouseleave', clearHighlight);
+  });
+
+
+  // ----- SECTION 3: refcount demo -----
+  const tensorsData = [
+    { id: 't1', name: 't1 — tok_embeddings', meta: 'view at base+0x80, shape [32000, 4096]' },
+    { id: 't2', name: 't2 — attn.wq',         meta: 'view at base+0x12'+"'"+'4080, shape [4096, 4096]' },
+    { id: 't3', name: 't3 — ffn.gate',        meta: 'view at base+0x1E'+"'"+'4080, shape [11008, 4096]' },
+  ];
+
+  const listEl = document.getElementById('tensorList');
+  const countEl = document.getElementById('refcount');
+  const statusEl = document.getElementById('refStatus');
+  const resetBtn = document.getElementById('resetBtn');
+
+  let alive = new Set();
+
+  function render() {
+    listEl.innerHTML = '';
+    for (const t of tensorsData) {
+      const isAlive = alive.has(t.id);
+      const card = document.createElement('div');
+      card.className = 'tensor-card' + (isAlive ? '' : ' dead');
+      card.innerHTML = `
+        <div class="info">
+          <div class="nm">${t.name}</div>
+          <div class="meta">${t.meta}</div>
+        </div>
+        <button class="kill" ${isAlive ? '' : 'disabled'} data-id="${t.id}">
+          ${isAlive ? '✕ destroy' : 'destroyed'}
+        </button>
+      `;
+      listEl.appendChild(card);
+    }
+    listEl.querySelectorAll('button.kill').forEach(b => {
+      b.addEventListener('click', () => {
+        alive.delete(b.dataset.id);
+        render();
+      });
+    });
+    update();
+  }
+
+  function update() {
+    const n = alive.size;
+    countEl.textContent = n;
+    countEl.classList.toggle('zero', n === 0);
+    if (n === 0) {
+      statusEl.innerHTML = '<span class="dead">refcount hit 0 → <code style="color:var(--bad)">~MappedFile()</code> ran → <code style="color:var(--bad)">munmap()</code> released the region</span>';
+    } else if (n === tensorsData.length) {
+      statusEl.innerHTML = '<span class="alive">all tensors alive — mapping pinned in page cache</span>';
+    } else {
+      statusEl.innerHTML = `<span class="alive">${n} tensor${n>1?'s':''} still referencing the mapping — pages remain accessible</span>`;
+    }
+  }
+
+  function reset() {
+    alive = new Set(tensorsData.map(t => t.id));
+    render();
+  }
+
+  resetBtn.addEventListener('click', reset);
+  reset();
+</script>
+
+</body>
+</html>
