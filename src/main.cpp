@@ -69,9 +69,9 @@ int main() {
   fill_random(Wu);
   fill_random(Wd);
 
-  LinearLayer gate(Wg);
-  LinearLayer up(Wu);
-  LinearLayer down(Wd);
+  LinearLayer gate(std::move(Wg));
+  LinearLayer up(std::move(Wu));
+  LinearLayer down(std::move(Wd));
 
-  MLP swiglu_mlp(gate, up, down);
+  MLP swiglu_mlp(std::move(gate), std::move(up), std::move(down));
 }

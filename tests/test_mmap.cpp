@@ -65,16 +65,12 @@ void run_mmap_tests(TestState& s) {
     check_floats(s, "mmap bytes decode to expected floats", fp, vals);
 
     // --- 4b: mmap-backed Tensor view ---
-    // REQUIRES your step-2 view constructor, signature:
-    //   Tensor(std::vector<int> shape, const float* data,
-    //          std::shared_ptr<void> owner);
-    // Uncomment once that exists. The mapping is held by `mapping`; the Tensor's
-    // owner_ keeps it alive, so munmap fires only when the last ref is gone.
-    //
-    // auto mapping = std::make_shared<MappedFile>(path);
-    // const float* base = reinterpret_cast<const float*>(mapping->data());
-    // Tensor view({2, 3}, base, mapping);
-    // check(s, "mmap-backed tensor view", view, vals, {2, 3});
+    // The mapping is held by `mapping`; the Tensor's owner_ keeps it alive, so
+    // munmap fires only when the last ref is gone.
+    auto mapping = std::make_shared<MappedFile>(path);
+    const float* base = reinterpret_cast<const float*>(mapping->data());
+    Tensor view({2, 3}, base, mapping);
+    check(s, "mmap-backed tensor view", view, vals, {2, 3});
 
     std::error_code ec;
     std::filesystem::remove(path, ec);  // best-effort cleanup
