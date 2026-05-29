@@ -36,6 +36,9 @@ magi_engine
 *.gguf
 *.onnx
 
+# Generated golden fixtures (regenerate with: python3 tools/gen_golden.py)
+tests/golden/
+
 # Editor and OS noise
 .DS_Store
 .vscode/

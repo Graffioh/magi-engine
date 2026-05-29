@@ -9,19 +9,34 @@ Target model reference: TinyLlama 1.1B (22 layers, hidden 2048, 32 query heads,
 4 KV heads, head_dim 64, intermediate 5632, vocab 32000, RoPE base 10000,
 RMSNorm, SwiGLU MLP, grouped-query attention).
 
-The big structural idea: **weight loading and a toy reference model come
-before attention.** Attention is the hardest piece to get right and
-near-impossible to debug without a golden reference. We build the loading
-infrastructure + a tiny dummy model + Python-computed golden outputs first,
-then add attention against that scaffolding.
+The big structural idea: **golden reference outputs come before attention;
+real weight-file loading comes last, just before real inference.** Attention
+(RoPE + grouped-query + causal mask + softmax) is the easiest piece to get
+subtly wrong while still producing finite, plausible-looking numbers, and
+hand-computing its expected output is brutal — so a Python-computed golden
+reference comes first, and every layer is diffed against it. But that
+reference does **not** require a real weight loader: the toy model runs on
+weights generated in Python and fed through the simplest possible
+serialization, so the whole math stack (embedding → attention → MLP → logits
+→ greedy sampling) is built and verified end-to-end before any model-file
+parsing exists. Weight loading is I/O plumbing, not math — it is deferred and
+becomes the bridge to *real* inference.
 
-> **Progress note (out-of-order work).** Stage 2's *infrastructure* (the
-> `Tensor` storage refactor and the `MappedFile` mmap wrapper) was built
-> early, before the rest of Stage 1, because both were small and unblocked.
-> What still remains in Stage 2 is the part that depends on a file format:
-> the custom binary layout and `load_weights()`. Remaining near-term work in
-> roadmap order: **token embedding lookup (Stage 1)** → **binary format +
-> `load_weights` (Stage 2)** → **dummy weights + goldens (Stage 3)**.
+> **Plan revision (2026-05).** Two changes from the original plan: (1) the
+> model file format is **GGUF** (llama.cpp's format), F32 tensors only to
+> start (zero-copy mmap views), rather than a homemade format or safetensors —
+> real TinyLlama GGUFs exist to download, and a GGUF carries the model
+> hyperparameters *and* the tokenizer inside it. (2) The build order is
+> reordered so **attention and the full toy model are built before the GGUF
+> loader**, against Python goldens. The mmap infrastructure (`Tensor` storage
+> refactor + `MappedFile`) is already built and tested — it simply isn't
+> *used* until the GGUF loader lands later.
+>
+> Revised order from here: **golden harness (simple serialization)** →
+> **RoPE + attention** → **transformer block + full toy model + greedy
+> generation** (all vs goldens) → **GGUF loader (F32)** → **real TinyLlama
+> weights** → **tokenizer (from GGUF metadata)** → **end-to-end real
+> generation**.
 
 ## Stage 0 — Foundations
 
@@ -45,18 +60,20 @@ against random inputs without any weight loading infrastructure.
 - [x] `LinearLayer` (no bias, row-major weights in `(out, in)` storage).
 - [x] SwiGLU `MLP` (`down(SiLU(gate(x)) * up(x))`), with scratch buffers
       allocated inside `forward()` for now.
-- [ ] Token embedding lookup (`out = embed_weights[token_id]`).
+- [x] Token embedding lookup (`out = embed_weights[token_id]`), via
+      `ops::embed` + thin `EmbeddingLayer` wrapper.
 - [x] Hand-computed tests for `MLP` in `tests/`.
-- [ ] Hand-computed test for embedding in `tests/`.
+- [x] Hand-computed test for embedding in `tests/`.
 
 Exit criteria: scratchpad constructs an `MLP` from random tensors, runs
 `forward(x)` on a random input, prints a finite, correctly-shaped output.
 
-## Stage 2 — Weight Loading Infrastructure
+## Stage 2 — Storage And Mmap Infrastructure (done)
 
-Scope: replace the "fill weights from a `std::vector` in code" pattern with
-real weight loading via `mmap`. This is foundational for everything that
-follows.
+Scope: backing storage that can either own its data or view into an mmap'd
+region. Built early because both pieces were small and unblocked. The file
+*parsing* that consumes this (`load_weights`) is deferred to the GGUF stage
+below — these are the foundations it will stand on.
 
 - [x] `Tensor` refactor: backing storage becomes
       `float* + std::shared_ptr<void>` so a tensor can either own
@@ -65,40 +82,32 @@ follows.
 - [x] `MappedFile` RAII wrapper (`open` → `fstat` → `mmap(PROT_READ)` →
       `munmap`/`close` in destructor). POSIX-only. (Has its own smoke test in
       `tests/test_mmap.cpp`; named `MappedFile` rather than `MmapFile`.)
-- [ ] Custom binary file format (magic, version, directory of name + rank +
-      shape + offset, 16-byte-aligned float data section).
-- [ ] `load_weights(path)` returning `std::unordered_map<std::string, Tensor>`,
-      with each tensor's data pointer aiming into the mmap and the
-      `shared_ptr<MmapFile>` keeping the region alive.
-- [ ] Single-tensor smoke test: write a `.bin`, load it back, verify byte-for-
-      byte.
 
-Exit criteria: a binary file written by a small C++ writer (or Python) can be
-loaded via `load_weights` and the tensors printed — values match what was
-written.
+Exit criteria (met): a `MappedFile` maps a raw float blob and a `Tensor` view
+over it reads back the expected values (`tests/test_mmap.cpp`).
 
-## Stage 3 — Dummy Model And Golden Outputs
+## Stage 3 — Golden Reference Harness
 
-Scope: a toy model file in the same format used for real weights, plus
-Python-computed reference outputs for every op. This becomes the ground truth
-for the rest of development.
+Scope: Python-computed reference outputs for every op, decoupled from any real
+file format. This is the ground truth that makes attention debuggable. The
+serialization is deliberately the dumbest thing that works — **not** GGUF —
+so it can exist before the loader does.
 
 - [ ] Toy dims: `vocab=32`, `hidden=8`, `intermediate=16`, `n_layers=2`,
       `n_heads=2`, `n_kv_heads=1`, `head_dim=4`, `max_seq=16`. Small enough
       to print whole tensors, structured enough to exercise GQA and stacking.
-- [ ] `tools/make_dummy_weights.py`: NumPy-based, fixed seed, emits the full
-      Llama-style weight set with HuggingFace-style names
-      (`model.layers.{i}.self_attn.q_proj.weight`, etc.).
-- [ ] `tools/make_golden_outputs.py`: same dummy weights, reference forward
-      pass in NumPy (or stub PyTorch); emits a sibling file with expected
-      outputs for embedding, RMSNorm, MLP, and (later) RoPE / attention.
-- [ ] Scratchpad wire-up: load `toy.bin`, build one `MLP` from layer-0
-      weights, run on `embed(token_id=5)`, print and eyeball.
-- [ ] Tests load the toy weights and check `MLP` / embedding outputs against
-      the goldens.
+- [ ] `tools/gen_golden.py`: NumPy-based, fixed seed. Generates the toy weight
+      set *and* a reference forward pass; emits both the weights and the
+      expected outputs (embedding, RMSNorm, MLP, and later RoPE / attention).
+- [ ] Serialization: raw little-endian `float32` dumps (one blob per tensor,
+      shapes known by the test) read back through the existing `MappedFile`,
+      or a generated C++ header of `static const float[]`. No magic, no
+      directory — that complexity is GGUF's job later.
+- [ ] Tests load the toy weights + goldens and check `MLP` / embedding (and
+      later attention / full-model) outputs within tolerance.
 
 Exit criteria: every op implemented so far has a golden-output test that
-passes against the dummy model.
+passes against the toy reference.
 
 ## Stage 4 — RoPE And Attention
 
@@ -133,32 +142,51 @@ Exit criteria: full forward + greedy generation runs on the toy weights and
 matches the Python reference logits at every layer boundary. Output text is
 gibberish (random weights), but the machinery works end-to-end.
 
-## Stage 6 — Real TinyLlama Weights
+## Stage 6 — GGUF Loading And Real TinyLlama Weights
 
-Scope: load actual TinyLlama from a HuggingFace checkpoint into the same
-engine.
+Scope: the deferred I/O plumbing, then real weights through it. This is the
+bridge from toy-model-in-memory to a real checkpoint. Build the loader against
+a tiny F32 GGUF first (written by Python `gguf`), then point it at the real
+model.
 
-- [ ] Either: extend `load_weights` to parse `safetensors` directly (JSON
-      header + raw fp32/fp16 blob), or add `tools/convert_safetensors.py`
-      that re-packs HF weights into the custom format.
-- [ ] Name mapping: HF parameter names → engine layers.
-- [ ] Dtype handling: start fp32; convert from fp16 on load if needed.
+GGUF loader (F32 tensors only to start):
+
+- [ ] Header parse: magic `"GGUF"`, `version`, `tensor_count`,
+      `metadata_kv_count` (all little-endian).
+- [ ] Metadata KV parser: typed values incl. arrays (`read_metadata_value`
+      dispatch on the type enum). Extract hyperparameters — `block_count`,
+      head counts, `embedding_length`, RoPE `freq_base`, RMSNorm eps.
+- [ ] Tensor directory parse: name, dims, `ggml_type` (assert F32 == 0),
+      `offset`. Reverse ggml dim order (`ne[0]` is the inner/fast dim).
+- [ ] Build `Tensor` mmap views: data section start padded to
+      `general.alignment` (default 32); each view at `base + data_start +
+      offset`, sharing the `MappedFile` via `owner_`. Returns
+      `std::unordered_map<std::string, Tensor>`.
+- [ ] Round-trip test: a tiny F32 GGUF written by Python `gguf`, loaded in
+      C++, values match the NumPy source.
+
+Real weights:
+
+- [ ] Obtain an F32 TinyLlama GGUF (convert from HF with llama.cpp's
+      `convert_hf_to_gguf.py --outtype f32`, or download one).
+- [ ] Name mapping: ggml names (`blk.{i}.attn_q.weight`, `token_embd.weight`,
+      `output_norm.weight`, …) → engine layers.
 - [ ] Sanity checks: norms of a few known weight matrices match a Python
       reference.
 
-Exit criteria: model constructed from a real TinyLlama checkpoint; one
-forward pass on a fixed input matches reference logits within small
-tolerance.
+Exit criteria: model constructed from a real TinyLlama GGUF; one forward pass
+on a fixed input matches reference logits within small tolerance.
 
 ## Stage 7 — Tokenizer
 
 Scope: turn strings into token ids and back.
 
 - [ ] Choose path:
-  - Minimal: load TinyLlama's `tokenizer.model` (SentencePiece BPE) via a
-    vendored small SentencePiece reader, or
-  - Simpler: pre-encode prompts in Python and feed token ids to the engine
-    while the C++ tokenizer matures.
+  - Preferred: pull the vocab / scores / merges straight from the **GGUF
+    metadata** parsed in Stage 6 (`tokenizer.ggml.*` keys) — no separate
+    tokenizer file needed, and
+  - Simpler stopgap: pre-encode prompts in Python and feed token ids to the
+    engine while the C++ tokenizer matures.
 - [ ] Implement encode / decode for the chat template used by TinyLlama-Chat
       (`<|system|>`, `<|user|>`, `<|assistant|>`).
 - [ ] Round-trip test on a known string.

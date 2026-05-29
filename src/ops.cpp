@@ -180,14 +180,14 @@ void softmax(const Tensor& IN, Tensor& OUT) {
 }
 
 // OUT[i] = W[id]
-void embed(const Tensor& W, const std::vector<int>& ids, Tensor& OUT) {
-    const int hidden_dim = W.dim(1);
+void embed(const std::vector<int>& ids, const Tensor& We, Tensor& OUT) {
+    const int hidden_dim = We.dim(1);
 
-    const float* w_data   = W.data_ptr();
+    const float* w_data   = We.data_ptr();
     float*       out_data = OUT.data_ptr();
     for (size_t i = 0; i < ids.size(); ++i) {
         const int id = ids[i];
-        assert(id >= 0 && id < W.dim(0));
+        assert(id >= 0 && id < We.dim(0));
 
         std::memcpy(&out_data[i * hidden_dim], &w_data[id * hidden_dim], hidden_dim * sizeof(float));
     }

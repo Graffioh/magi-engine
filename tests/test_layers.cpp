@@ -62,4 +62,28 @@ void run_layers_tests(TestState& s) {
         check(s, "mlp swiglu: (2,2) shape-preserving", out, { 7.9086205f, 7.4770389f, 7.9086205f, 7.4770389f },
               { 2, 2 });
     }
+
+    // --- Embedding: gather rows of W by token id (vocab=4, hidden=3) ---
+    // W row n = [n*10+0, n*10+1, n*10+2], so each row is self-identifying.
+    // ids = [2, 0] must fetch row 2 then row 0 (proves source uses id, dest uses position).
+    {
+        Tensor We({ 4, 3 });
+        fill(We, { 0, 1, 2, 10, 11, 12, 20, 21, 22, 30, 31, 32 });
+        EmbeddingLayer emb(std::move(We));
+
+        Tensor out({ 2, 3 });  // (T=2, hidden=3), caller pre-allocates
+        emb.forward({ 2, 0 }, out);
+        check(s, "embed: ids [2,0] gather rows", out, { 20, 21, 22, 0, 1, 2 }, { 2, 3 });
+    }
+
+    // --- Embedding: a repeated id yields two identical rows ---
+    {
+        Tensor We({ 4, 3 });
+        fill(We, { 0, 1, 2, 10, 11, 12, 20, 21, 22, 30, 31, 32 });
+        EmbeddingLayer emb(std::move(We));
+
+        Tensor out({ 2, 3 });
+        emb.forward({ 1, 1 }, out);
+        check(s, "embed: repeated id [1,1] identical rows", out, { 10, 11, 12, 10, 11, 12 }, { 2, 3 });
+    }
 }

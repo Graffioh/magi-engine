@@ -9,5 +9,5 @@ void SiLU(const Tensor& IN, Tensor& OUT);
 void add(const Tensor& A, const Tensor& B, Tensor& OUT);
 void mul(const Tensor& A, const Tensor& B, Tensor& OUT);
 void softmax(const Tensor& IN, Tensor& OUT);
-void embed(const Tensor& W, const std::vector<int>& ids, Tensor& OUT);
+void embed(const std::vector<int>& ids, const Tensor& We, Tensor& OUT);
 }  // namespace ops

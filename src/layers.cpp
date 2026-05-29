@@ -13,7 +13,7 @@ void LinearLayer::forward(const Tensor& IN, Tensor& OUT) const {
 EmbeddingLayer::EmbeddingLayer(Tensor We) : We_(std::move(We)) {}
 
 void EmbeddingLayer::forward(const std::vector<int>& token_ids, Tensor& OUT) const {
-    ops::embed(We_, token_ids, OUT);
+    ops::embed(token_ids, We_, OUT);
 }
 
 MLP::MLP(LinearLayer gate, LinearLayer up, LinearLayer down) :
