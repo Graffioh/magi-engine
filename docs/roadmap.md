@@ -93,17 +93,17 @@ file format. This is the ground truth that makes attention debuggable. The
 serialization is deliberately the dumbest thing that works — **not** GGUF —
 so it can exist before the loader does.
 
-- [ ] Toy dims: `vocab=32`, `hidden=8`, `intermediate=16`, `n_layers=2`,
+- [x] Toy dims: `vocab=32`, `hidden=8`, `intermediate=16`, `n_layers=2`,
       `n_heads=2`, `n_kv_heads=1`, `head_dim=4`, `max_seq=16`. Small enough
       to print whole tensors, structured enough to exercise GQA and stacking.
-- [ ] `tools/gen_golden.py`: NumPy-based, fixed seed. Generates the toy weight
+- [x] `tools/gen_golden_weights.py`: NumPy-based, fixed seed. Generates the toy weight
       set *and* a reference forward pass; emits both the weights and the
       expected outputs (embedding, RMSNorm, MLP, and later RoPE / attention).
-- [ ] Serialization: raw little-endian `float32` dumps (one blob per tensor,
+- [x] Serialization: raw little-endian `float32` dumps (one blob per tensor,
       shapes known by the test) read back through the existing `MappedFile`,
       or a generated C++ header of `static const float[]`. No magic, no
       directory — that complexity is GGUF's job later.
-- [ ] Tests load the toy weights + goldens and check `MLP` / embedding (and
+- [x] Tests load the toy weights + goldens and check `MLP` / embedding (and
       later attention / full-model) outputs within tolerance.
 
 Exit criteria: every op implemented so far has a golden-output test that

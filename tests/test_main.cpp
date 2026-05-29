@@ -6,6 +6,7 @@ void run_tensor_tests(TestState&);
 void run_ops_tests(TestState&);
 void run_mmap_tests(TestState&);
 void run_layers_tests(TestState&);
+void run_golden_tests(TestState&);
 
 int main() {
     TestState s;
@@ -21,6 +22,9 @@ int main() {
 
     std::cout << "\n=== layers ===\n";
     run_layers_tests(s);
+
+    std::cout << "\n=== golden ===\n";
+    run_golden_tests(s);
 
     std::cout << "\nresults: " << s.passed << " passed, " << s.failed << " failed\n";
     return s.failed == 0 ? 0 : 1;

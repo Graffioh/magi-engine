@@ -27,6 +27,7 @@ add_executable(magi_tests
   tests/test_ops.cpp
   tests/test_mmap.cpp
   tests/test_layers.cpp
+  tests/test_golden.cpp
   src/layers.cpp
   src/mmap.cpp
   src/ops.cpp
@@ -34,6 +35,12 @@ add_executable(magi_tests
 )
 
 target_include_directories(magi_tests PRIVATE src)
+
+# Absolute path to the generated golden fixtures, so tests don't depend on the
+# working directory. Blobs are gitignored; regenerate with tools/gen_golden_weights.py.
+target_compile_definitions(magi_tests PRIVATE
+  MAGI_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden"
+)
 
 target_compile_options(magi_tests PRIVATE
   -Wall

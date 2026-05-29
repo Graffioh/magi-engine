@@ -16,7 +16,7 @@ change it here too and regenerate.
 
 Serialization: one `<name>.f32` file per tensor (raw little-endian float32,
 row-major). Shapes are fixed by the toy dims below and known to the C++ test;
-`manifest.txt` records them for reference. Run:  python3 tools/gen_golden.py
+`manifest.txt` records them for reference. Run:  python3 tools/gen_golden_weights.py
 """
 
 from pathlib import Path
