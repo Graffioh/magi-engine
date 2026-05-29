@@ -29,6 +29,7 @@ bool can_matmul(const Tensor& A, const Tensor& B) {
     return true;
 }
 
+// matmul kernel
 void matmul_2d(const float* A_data, const float* B_data, float* OUT_data, int M, int K, int N) {
     for (int i = 0; i < M; ++i) {
         for (int j = 0; j < N; ++j) {
@@ -41,6 +42,7 @@ void matmul_2d(const float* A_data, const float* B_data, float* OUT_data, int M,
     }
 }
 
+// rmsnorm kernel
 void RMSNorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int dim, float eps) {
     // mean square aggregation
     float sum = 0;
@@ -174,6 +176,20 @@ void softmax(const Tensor& IN, Tensor& OUT) {
         for (int i = 0; i < last_dim; ++i) {
             out_data[r * last_dim + i] /= sum_j;
         }
+    }
+}
+
+// OUT[i] = W[id]
+void embed(const Tensor& W, const std::vector<int>& ids, Tensor& OUT) {
+    const int hidden_dim = W.dim(1);
+
+    const float* w_data   = W.data_ptr();
+    float*       out_data = OUT.data_ptr();
+    for (size_t i = 0; i < ids.size(); ++i) {
+        const int id = ids[i];
+        assert(id >= 0 && id < W.dim(0));
+
+        std::memcpy(&out_data[i * hidden_dim], &w_data[id * hidden_dim], hidden_dim * sizeof(float));
     }
 }
 

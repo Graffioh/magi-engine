@@ -15,6 +15,14 @@ near-impossible to debug without a golden reference. We build the loading
 infrastructure + a tiny dummy model + Python-computed golden outputs first,
 then add attention against that scaffolding.
 
+> **Progress note (out-of-order work).** Stage 2's *infrastructure* (the
+> `Tensor` storage refactor and the `MappedFile` mmap wrapper) was built
+> early, before the rest of Stage 1, because both were small and unblocked.
+> What still remains in Stage 2 is the part that depends on a file format:
+> the custom binary layout and `load_weights()`. Remaining near-term work in
+> roadmap order: **token embedding lookup (Stage 1)** → **binary format +
+> `load_weights` (Stage 2)** → **dummy weights + goldens (Stage 3)**.
+
 ## Stage 0 — Foundations
 
 Scope: storage, math primitives, and a build that runs.
@@ -35,10 +43,11 @@ Scope: the layers that don't need attention. These can be built and tested
 against random inputs without any weight loading infrastructure.
 
 - [x] `LinearLayer` (no bias, row-major weights in `(out, in)` storage).
-- [ ] SwiGLU `MLP` (`down(SiLU(gate(x)) * up(x))`), with scratch buffers
+- [x] SwiGLU `MLP` (`down(SiLU(gate(x)) * up(x))`), with scratch buffers
       allocated inside `forward()` for now.
 - [ ] Token embedding lookup (`out = embed_weights[token_id]`).
-- [ ] Hand-computed tests for `MLP` and embedding in `tests/`.
+- [x] Hand-computed tests for `MLP` in `tests/`.
+- [ ] Hand-computed test for embedding in `tests/`.
 
 Exit criteria: scratchpad constructs an `MLP` from random tensors, runs
 `forward(x)` on a random input, prints a finite, correctly-shaped output.
@@ -49,12 +58,13 @@ Scope: replace the "fill weights from a `std::vector` in code" pattern with
 real weight loading via `mmap`. This is foundational for everything that
 follows.
 
-- [ ] `Tensor` refactor: backing storage becomes
-      `float* + size_t + std::shared_ptr<void>` so a tensor can either own
+- [x] `Tensor` refactor: backing storage becomes
+      `float* + std::shared_ptr<void>` so a tensor can either own
       its data (vector-backed) or view into an mmap'd region. Existing tests
       keep passing unchanged.
-- [ ] `MmapFile` RAII wrapper (`open` → `fstat` → `mmap(PROT_READ)` →
-      `munmap`/`close` in destructor). POSIX-only.
+- [x] `MappedFile` RAII wrapper (`open` → `fstat` → `mmap(PROT_READ)` →
+      `munmap`/`close` in destructor). POSIX-only. (Has its own smoke test in
+      `tests/test_mmap.cpp`; named `MappedFile` rather than `MmapFile`.)
 - [ ] Custom binary file format (magic, version, directory of name + rank +
       shape + offset, 16-byte-aligned float data section).
 - [ ] `load_weights(path)` returning `std::unordered_map<std::string, Tensor>`,

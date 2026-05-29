@@ -13,6 +13,14 @@ class LinearLayer {
     int get_weight_out_features() const { return W_.dim(0); };
 };
 
+class EmbeddingLayer {
+  private:
+    Tensor We_;
+  public:
+    EmbeddingLayer(Tensor We);
+    void forward(const std::vector<int>& token_ids, Tensor& OUT) const;
+};
+
 // SwiGLU MLP
 class MLP {
   private:
