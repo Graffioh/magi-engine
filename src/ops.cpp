@@ -70,19 +70,19 @@ void matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     const int K = A.dim(-1);  // === B.dim(-1)
     const int N = B.dim(-2);
 
-    // total batch size = product of all leading dims (everything before the last two)
-    int batch_size = 1;
+    // number of independent 2D matmuls = product of all leading dims (everything before the last two)
+    int num_matrices = 1;
     for (int i = 0; i + 2 < A.rank(); ++i) {
-        batch_size *= A.dim(i);
+        num_matrices *= A.dim(i);
     }
 
     const float* A_data   = A.data_ptr();
     const float* B_data   = B.data_ptr();
     float*       OUT_data = OUT.data_ptr();
 
-    // do matmul across batches
-    for (int b = 0; b < batch_size; ++b) {
-        matmul_2d(A_data + b * (M * K), B_data + b * (N * K), OUT_data + b * (M * N), M, K, N);
+    // run one 2D matmul per leading-dim slice
+    for (int m = 0; m < num_matrices; ++m) {
+        matmul_2d(A_data + m * (M * K), B_data + m * (N * K), OUT_data + m * (M * N), M, K, N);
     }
 }
 
@@ -90,9 +90,9 @@ void matmul(const Tensor& A, const Tensor& B, Tensor& OUT) {
 // OUT[i] = (IN[i] / rms) * W[i]
 void RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
     int hidden_dim = IN.dim(-1);
-    int batch_size = 1;
+    int num_rows   = 1;
     for (int i = 0; i + 1 < IN.rank(); ++i) {
-        batch_size *= IN.dim(i);
+        num_rows *= IN.dim(i);
     }
 
     const float* in_data  = IN.data_ptr();
@@ -100,8 +100,8 @@ void RMSNorm(const Tensor& IN, const Tensor& W, Tensor& OUT, float eps) {
     float*       out_data = OUT.data_ptr();
 
     // weight is shared across rows (size hidden_dim), input/output advance per row
-    for (int b = 0; b < batch_size; ++b) {
-        RMSNorm_1d(in_data + b * hidden_dim, w_data, out_data + b * hidden_dim, hidden_dim, eps);
+    for (int r = 0; r < num_rows; ++r) {
+        RMSNorm_1d(in_data + r * hidden_dim, w_data, out_data + r * hidden_dim, hidden_dim, eps);
     }
 }
 
@@ -152,27 +152,27 @@ void mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
 // m = max_j IN[j]
 // softmax(IN)_i = e^(IN[i] - m) / sum_j e^(IN[j] - m)   (along last dim)
 void softmax(const Tensor& IN, Tensor& OUT) {
-    int batch_size = 1;
+    int num_rows = 1;
     for (int i = 0; i + 1 < IN.rank(); ++i) {
-        batch_size *= IN.dim(i);
+        num_rows *= IN.dim(i);
     }
 
     const float* in_data  = IN.data_ptr();
     float*       out_data = OUT.data_ptr();
     int          last_dim = IN.dim(-1);
-    for (int b = 0; b < batch_size; ++b) {
-        const float* in_row_dim = in_data + b * last_dim;
+    for (int r = 0; r < num_rows; ++r) {
+        const float* in_row_dim = in_data + r * last_dim;
         float        max_val    = *std::max_element(in_row_dim, in_row_dim + last_dim);
 
         float sum_j = 0;
         for (int j = 0; j < last_dim; ++j) {
-            float e                    = expf(in_data[b * last_dim + j] - max_val);
-            out_data[b * last_dim + j] = e;
+            float e                    = expf(in_data[r * last_dim + j] - max_val);
+            out_data[r * last_dim + j] = e;
             sum_j += e;
         }
 
         for (int i = 0; i < last_dim; ++i) {
-            out_data[b * last_dim + i] /= sum_j;
+            out_data[r * last_dim + i] /= sum_j;
         }
     }
 }
