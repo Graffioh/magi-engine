@@ -76,6 +76,37 @@ def embed(ids, weight):
     return weight[np.asarray(ids, dtype=np.int64)].astype(np.float32)
 
 
+def rope(x, n_heads, head_dim, base=10000, start_pos=0):
+    """Interleaved RoPE, float32 throughout. Mirrors apply_rope in src/ops.cpp.
+
+    x is (seq_len, n_heads*head_dim), row-major. For token row s, head h, and
+    pair p in [0, head_dim/2):
+        col_a = h*head_dim + 2*p ; col_b = col_a + 1
+        pos   = start_pos + s
+        freq  = base ** (-2*p / head_dim)
+        theta = pos * freq
+        a' = a*cos(theta) - b*sin(theta) ; b' = a*sin(theta) + b*cos(theta)
+    Everything is cast to float32 so transcendentals match C libm as closely as
+    possible (a few-ULP drift remains; see the C++ golden tolerance).
+    """
+    out = x.astype(np.float32).copy()
+    seq_len = x.shape[0]
+    for s in range(seq_len):
+        pos = np.float32(start_pos + s)
+        for h in range(n_heads):
+            head_base = h * head_dim
+            for p in range(head_dim // 2):
+                freq = np.float32(base) ** np.float32(-2.0 * p / head_dim)
+                theta = np.float32(pos * freq)
+                cos_t = np.float32(np.cos(theta))
+                sin_t = np.float32(np.sin(theta))
+                a = out[s, head_base + 2 * p]
+                b = out[s, head_base + 2 * p + 1]
+                out[s, head_base + 2 * p] = np.float32(a * cos_t - b * sin_t)
+                out[s, head_base + 2 * p + 1] = np.float32(a * sin_t + b * cos_t)
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Weight generation. One fixed-seed Generator -> fully reproducible.
 # ----------------------------------------------------------------------------
@@ -130,8 +161,21 @@ def make_goldens(w):
         w["layer0.mlp.down.weight"],
     )
 
-    # TODO (Stage 4): g["golden.rope_q"], g["golden.attn_out"] once RoPE /
-    # attention exist in C++. TODO (Stage 5): g["golden.logits"].
+    # RoPE vs golden. Q/K are seeded directly (small randn-style values) and
+    # saved as goldens too, so the C++ RoPE unit test loads the *same* input
+    # bytes -- decoupling it from matmul/rmsnorm. Q has N_HEADS heads, K has
+    # N_KV_HEADS heads (GQA); both use HEAD_DIM and start_pos=0.
+    rope_rng = np.random.default_rng(SEED + 1)
+    seq_len = len(INPUT_IDS)  # T = 3
+    q_in = (rope_rng.standard_normal((seq_len, N_HEADS * HEAD_DIM)) * 0.5).astype(np.float32)
+    k_in = (rope_rng.standard_normal((seq_len, N_KV_HEADS * HEAD_DIM)) * 0.5).astype(np.float32)
+    g["golden.rope_q_in"] = q_in
+    g["golden.rope_k_in"] = k_in
+    g["golden.rope_q_out"] = rope(q_in, N_HEADS, HEAD_DIM)
+    g["golden.rope_k_out"] = rope(k_in, N_KV_HEADS, HEAD_DIM)
+
+    # TODO (Stage 4): g["golden.attn_out"] once attention exists in C++.
+    # TODO (Stage 5): g["golden.logits"].
     return g
 
 

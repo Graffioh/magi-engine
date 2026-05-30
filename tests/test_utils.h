@@ -3,7 +3,9 @@
 #include "tensor.h"
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,19 @@ inline void fill(Tensor& t, const std::vector<float>& vals) {
     float* p = t.data_ptr();
     for (size_t i = 0; i < vals.size(); ++i) {
         p[i] = vals[i];
+    }
+}
+
+// Fills `t` with deterministic pseudo-random values in [lo, hi] from a seeded
+// mt19937. Used by invariant tests (e.g. RoPE norm preservation) that just
+// need non-trivial, reproducible data rather than a hand-seeded vector.
+inline void fill_random_norm(Tensor& t, uint32_t seed = 42, float lo = -1.0f, float hi = 1.0f) {
+    std::mt19937                          rng(seed);
+    std::uniform_real_distribution<float> dist(lo, hi);
+    float*                                p = t.data_ptr();
+    int                                   n = t.num_elements();
+    for (int i = 0; i < n; ++i) {
+        p[i] = dist(rng);
     }
 }
 

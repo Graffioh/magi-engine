@@ -5,6 +5,7 @@
 #include "test_utils.h"
 
 #include <cassert>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -46,11 +47,23 @@ std::vector<float> flat(const Tensor& t) {
     return std::vector<float>(p, p + t.num_elements());
 }
 
+// Copy a `<name>.f32` blob into a mutable heap Tensor. Needed for in-place ops
+// (RoPE) whose input must be writable -- load_golden returns a read-only mmap.
+Tensor load_golden_mut(const std::vector<int>& shape, const std::string& name) {
+    Tensor src = load_golden(shape, name);
+    Tensor dst(shape);
+    std::memcpy(dst.data_ptr(), src.data_ptr(), src.num_elements() * sizeof(float));
+    return dst;
+}
+
 // Toy dims -- must match tools/gen_golden_weights.py.
 constexpr int T            = 3;  // len(INPUT_IDS)
 constexpr int VOCAB        = 32;
 constexpr int HIDDEN       = 8;
 constexpr int INTERMEDIATE = 16;
+constexpr int HEAD_DIM     = 4;
+constexpr int N_HEADS      = 2;
+constexpr int N_KV_HEADS   = 1;
 
 }  // namespace
 
@@ -92,5 +105,18 @@ void run_golden_tests(TestState& s) {
         mlp.forward(x, out);
         Tensor golden = load_golden({ T, HIDDEN }, "golden.mlp_out");
         check(s, "golden: mlp", out, flat(golden), { T, HIDDEN }, 1e-4f);
+    }
+
+    // --- RoPE vs golden (loads the saved Q/K inputs, so it tests RoPE alone) ---
+    // Tolerance is loosened to 1e-4 because float32 sin/cos/pow differ by a few
+    // ULP between C libm and NumPy, and those errors accumulate per pair.
+    {
+        Tensor Q = load_golden_mut({ T, N_HEADS * HEAD_DIM }, "golden.rope_q_in");
+        Tensor K = load_golden_mut({ T, N_KV_HEADS * HEAD_DIM }, "golden.rope_k_in");
+        ops::RoPE(Q, K, HEAD_DIM);  // default start_pos=0, base=10000
+        Tensor golden_q = load_golden({ T, N_HEADS * HEAD_DIM }, "golden.rope_q_out");
+        Tensor golden_k = load_golden({ T, N_KV_HEADS * HEAD_DIM }, "golden.rope_k_out");
+        check(s, "golden: rope (Q)", Q, flat(golden_q), { T, N_HEADS * HEAD_DIM }, 1e-4f);
+        check(s, "golden: rope (K)", K, flat(golden_k), { T, N_KV_HEADS * HEAD_DIM }, 1e-4f);
     }
 }

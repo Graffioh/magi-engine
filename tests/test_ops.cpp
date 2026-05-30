@@ -186,4 +186,91 @@ void run_ops_tests(TestState& s) {
           std::vector<int>{ 2, 2, 2 });
     check(s, "mul: rank-3 (2,2,2)", OUT_mul3, std::vector<float>{ 8, 14, 18, 20, 20, 18, 14, 8 },
           std::vector<int>{ 2, 2, 2 });
+
+    // RoPE toy dims -- must match HEAD_DIM/N_HEADS/N_KV_HEADS in gen_golden_weights.py.
+    constexpr int HEAD_DIM   = 4;
+    constexpr int N_HEADS    = 2;
+    constexpr int N_KV_HEADS = 1;
+
+    // RoPE: pos=0 identity. A single token sits at position 0, where theta=0 for
+    // every pair (cos=1, sin=0), so the rotation is the identity. seq_len MUST be
+    // 1: rows beyond position 0 rotate by a non-zero angle and would not match.
+    {
+        Tensor               Q({ 1, N_HEADS * HEAD_DIM });     // (seq_len=1, 8)
+        Tensor               K({ 1, N_KV_HEADS * HEAD_DIM });  // (seq_len=1, 4)
+        std::vector<float>   q_vals = { 0.1f, -0.2f, 0.3f, -0.4f, 0.5f, -0.6f, 0.7f, -0.8f };
+        std::vector<float>   k_vals = { 1.5f, -2.5f, 3.5f, -4.5f };
+        fill(Q, q_vals);
+        fill(K, k_vals);
+        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/0);
+        // theta=0 -> bit-exact identity, but reuse check()'s default tolerance.
+        check(s, "rope: pos=0 identity (Q)", Q, q_vals, std::vector<int>{ 1, N_HEADS * HEAD_DIM });
+        check(s, "rope: pos=0 identity (K)", K, k_vals, std::vector<int>{ 1, N_KV_HEADS * HEAD_DIM });
+    }
+
+    // RoPE: norm preservation. Rotation is orthogonal, so the total sum-of-squares
+    // of Q (and of K) is invariant under RoPE. A non-zero start_pos makes the
+    // rotations non-trivial; this is the test that catches sign errors in the
+    // pair update (a swapped sign breaks orthogonality and changes the norm).
+    {
+        Tensor Q({ 3, N_HEADS * HEAD_DIM });     // (T=3, 8)
+        Tensor K({ 3, N_KV_HEADS * HEAD_DIM });  // (T=3, 4)
+        fill_random_norm(Q, /*seed=*/123);
+        fill_random_norm(K, /*seed=*/456);
+
+        auto sum_sq = [](const Tensor& t) {
+            const float* p     = t.data_ptr();
+            float        total = 0;
+            for (int i = 0; i < t.num_elements(); ++i) {
+                total += p[i] * p[i];
+            }
+            return total;
+        };
+        float q_before = sum_sq(Q);
+        float k_before = sum_sq(K);
+        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/5);
+
+        Tensor Q_NORM({ 1 });
+        Q_NORM.data_ptr()[0] = sum_sq(Q);
+        check(s, "rope: norm preserved (Q, start_pos=5)", Q_NORM, std::vector<float>{ q_before },
+              std::vector<int>{ 1 });
+        Tensor K_NORM({ 1 });
+        K_NORM.data_ptr()[0] = sum_sq(K);
+        check(s, "rope: norm preserved (K, start_pos=5)", K_NORM, std::vector<float>{ k_before },
+              std::vector<int>{ 1 });
+    }
+
+    // RoPE: relative-shift invariance (the conceptual capstone). For single-head
+    // q,k vectors, score(m,n) = dot(rope(q,m), rope(k,n)) depends only on the
+    // relative offset m-n. We rotate a single vector by giving RoPE a (1,HEAD_DIM)
+    // tensor plus a throwaway second tensor (RoPE mutates both in place, so we use
+    // fresh copies each call). score(2,5) and score(4,7) both have m-n = -3.
+    {
+        const std::vector<float> q_base = { 0.3f, -0.7f, 0.2f, 0.9f };
+        const std::vector<float> k_base = { -0.4f, 0.6f, 0.8f, -0.1f };
+
+        // Rotate `vec_vals` (one head) at `pos` and return its dot with `other`.
+        auto rope_vec = [&](const std::vector<float>& vec_vals, int pos) {
+            Tensor vec({ 1, HEAD_DIM });
+            Tensor dummy({ 1, HEAD_DIM });  // throwaway: RoPE rotates both args
+            fill(vec, vec_vals);
+            fill(dummy, std::vector<float>(HEAD_DIM, 0.0f));
+            ops::RoPE(vec, dummy, HEAD_DIM, /*start_pos=*/pos);
+            return std::vector<float>(vec.data_ptr(), vec.data_ptr() + HEAD_DIM);
+        };
+        auto score = [&](int m, int n) {
+            std::vector<float> rq  = rope_vec(q_base, m);
+            std::vector<float> rk  = rope_vec(k_base, n);
+            float              dot = 0;
+            for (int i = 0; i < HEAD_DIM; ++i) {
+                dot += rq[i] * rk[i];
+            }
+            return dot;
+        };
+
+        Tensor SCORE({ 1 });
+        SCORE.data_ptr()[0] = score(2, 5);  // m-n = -3
+        check(s, "rope: relative-shift invariance score(2,5)==score(4,7)", SCORE,
+              std::vector<float>{ score(4, 7) }, std::vector<int>{ 1 }, 1e-4f);  // m-n = -3
+    }
 }

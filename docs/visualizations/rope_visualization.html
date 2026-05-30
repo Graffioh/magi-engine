@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RoPE — turn the arrow, don't add to it</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #141823;
+    --panel-2: #1c2130;
+    --border: #2a3142;
+    --border-soft: #232a3a;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --dim: #5c6478;
+    --accent: #7cc4ff;
+    --accent-2: #f0a35a;
+    --good: #74d99f;
+    --bad: #ff7676;
+    --c0: #7cc4ff;   /* query / blue */
+    --c1: #f0a35a;   /* key / orange */
+    --c2: #74d99f;
+    --c3: #c099ff;   /* sum / purple */
+    --c4: #ff7eb6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(124,196,255,0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(240,163,90,0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+  }
+  header { padding: 38px 40px 14px; border-bottom: 1px solid var(--border-soft); }
+  h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: 0.2px; }
+  header p { margin: 0; color: var(--muted); font-size: 14.5px; max-width: 820px; }
+  header p em { color: var(--text); font-style: normal; }
+  header .tag { color: var(--accent); font-weight: 600; }
+  header .you { color: var(--accent-2); font-weight: 600; }
+  main { padding: 26px 40px 110px; max-width: 880px; margin: 0 auto; }
+  section { margin-bottom: 30px; }
+
+  /* scene chrome */
+  .scene-no {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 1.6px;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+  .scene-no b {
+    color: var(--accent); font-weight: 800; font-size: 13px;
+    width: 22px; height: 22px; display: inline-grid; place-items: center;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2);
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+
+  .scene-cap { font-size: 15px; color: var(--text); margin: 18px 0 0; max-width: 740px; }
+  .scene-cap b { color: var(--accent); font-weight: 600; }
+  .footnote { color: var(--muted); font-size: 12.5px; margin-top: 12px; max-width: 740px; }
+  .footnote em { color: var(--text); font-style: normal; }
+
+  /* the curiosity hook that pulls one scene into the next */
+  .hook {
+    margin-top: 16px; padding: 12px 16px; border-radius: 10px;
+    background: linear-gradient(90deg, rgba(240,163,90,0.10), transparent);
+    border: 1px solid rgba(240,163,90,0.28);
+    color: var(--text); font-size: 14px; max-width: 740px;
+  }
+  .hook b { color: var(--accent-2); font-weight: 700; }
+
+  /* badges */
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .badge {
+    font-size: 11px; letter-spacing: 0.3px; padding: 5px 10px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--muted);
+  }
+  .badge.warn { color: var(--accent-2); border-color: rgba(240,163,90,0.35); }
+  .badge.go   { color: var(--good); border-color: rgba(116,217,159,0.3); }
+
+  /* controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 22px; align-items: center; margin-top: 20px; }
+  .ctl { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+  .ctl label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .ctl .val { color: var(--accent); font-weight: 700; }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 999px;
+    background: var(--border); outline: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 0; cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 0; cursor: pointer;
+  }
+  input[type="range"].key::-webkit-slider-thumb { background: var(--accent-2); }
+  input[type="range"].key::-moz-range-thumb { background: var(--accent-2); }
+
+  button.btn {
+    background: var(--accent); color: #0b1320; font-weight: 700;
+    border: 0; padding: 9px 16px; border-radius: 7px; cursor: pointer; font-size: 13px;
+    transition: transform 100ms ease, opacity 100ms ease;
+  }
+  button.btn:hover { transform: translateY(-1px); }
+  button.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.btn.ghost.on { border-color: var(--accent); color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); }
+
+  /* readouts */
+  .readouts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; align-items: stretch; }
+  .readout {
+    font-family: ui-monospace, monospace; font-size: 14px;
+    padding: 11px 15px; border-radius: 10px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text);
+  }
+  .readout .lbl { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 4px; }
+  .readout .num { color: var(--good); font-weight: 700; }
+  .readout.add .num { color: var(--c3); }
+  .readout.score.pulse { background: rgba(116,217,159,0.18); border-color: var(--good); }
+
+  /* score bar -1..1 */
+  .scorebar-wrap { margin-top: 18px; max-width: 460px; }
+  .scorebar {
+    position: relative; height: 10px; border-radius: 999px;
+    background: linear-gradient(90deg, rgba(255,118,118,0.4), var(--border-soft), rgba(116,217,159,0.4));
+    border: 1px solid var(--border-soft);
+  }
+  .scorebar .marker {
+    position: absolute; top: -4px; width: 4px; height: 18px; border-radius: 2px;
+    background: var(--good); transform: translateX(-50%);
+  }
+  .scorebar-axis { display: flex; justify-content: space-between; font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); margin-top: 5px; }
+
+  .center-stage { display: flex; justify-content: center; }
+  .flex-stage { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; align-items: center; }
+
+  /* scene 1 — two panels, one shared control */
+  .dual { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+  .dual .col {
+    flex: 1 1 280px; min-width: 260px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 12px; padding: 14px 12px 16px;
+  }
+  .dual .col.turn { border-color: rgba(124,196,255,0.32); }
+  .colcap { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); font-weight: 700; }
+  .dual .col.turn .colcap { color: var(--accent); }
+  .collen { font-family: ui-monospace, monospace; font-size: 13px; color: var(--text); }
+  .collen b { font-weight: 700; }
+  .collen.add b { color: var(--c3); }
+  .dual .col.turn .collen b { color: var(--accent); }
+
+  /* fluid diagrams — scale down cleanly on narrow windows (viewBox does the rest) */
+  #s1add, #s1turn { width: 100%; height: auto; max-width: 300px; display: block; }
+  #s2plane { width: 100%; height: auto; max-width: 340px; display: block; }
+  #s4strip { width: 100%; height: auto; max-width: 660px; display: block; }
+
+  /* sentence strip */
+  .strip { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 20px; justify-content: center; }
+  .tok {
+    position: relative;
+    font-family: ui-monospace, monospace; font-size: 13px;
+    padding: 7px 11px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--muted);
+    cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+    user-select: none;
+  }
+  .tok .ix { font-size: 9px; color: var(--muted); display: block; text-align: center; margin-top: 2px; }
+  .tok.qsel { color: var(--text); border-color: var(--c0); background: rgba(124,196,255,0.10); }
+  .tok.ksel { color: var(--text); border-color: var(--c1); background: rgba(240,163,90,0.10); }
+  .tok.both { background: linear-gradient(135deg, rgba(124,196,255,0.12), rgba(240,163,90,0.12)); }
+
+  /* optional "show why" derivation */
+  .why-toggle { margin-top: 18px; }
+  .deriv {
+    margin-top: 12px; padding: 16px 18px; border-radius: 10px; display: none;
+    background: var(--panel-2); border: 1px solid var(--border-soft);
+    font-family: ui-monospace, monospace; font-size: 13px; line-height: 2.05; color: var(--text); max-width: 640px;
+  }
+  .deriv.open { display: block; }
+  .deriv .step { display: block; }
+  .deriv .lead { color: var(--accent-2); }
+  .deriv .q { color: var(--c0); }
+  .deriv .k { color: var(--c1); }
+  .deriv .note { color: var(--muted); font-size: 12px; }
+  .deriv .punch { color: var(--good); }
+
+  /* scene 3 — clock column */
+  .clockrow-wrap { display: flex; justify-content: center; }
+  #s3clocks { width: 100%; max-width: 700px; height: 170px; display: block; }
+  .note-line {
+    font-family: ui-monospace, monospace; font-size: 13px;
+    margin-top: 18px; padding: 12px 16px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--border-soft); color: var(--text);
+    transition: border-color 160ms ease;
+  }
+  .note-line.hot { border-color: var(--accent-2); }
+  .note-line .hi { color: var(--accent-2); font-weight: 700; }
+
+  /* scene 4 — kernel */
+  .code-split { display: grid; grid-template-columns: 1fr; gap: 22px; }
+  @media (min-width: 720px) { .code-split { grid-template-columns: 1fr 1fr; } }
+  .dimstrip-wrap { overflow-x: auto; padding-bottom: 6px; }
+  code {
+    font-family: ui-monospace, monospace; font-size: 0.92em;
+    background: var(--panel-2); border: 1px solid var(--border-soft);
+    border-radius: 5px; padding: 1px 6px; color: var(--accent);
+  }
+  pre.code {
+    font-family: ui-monospace, monospace; font-size: 12.5px;
+    background: var(--panel-2); border: 1px solid var(--border-soft);
+    border-radius: 8px; color: var(--text); display: block; padding: 14px 16px; margin: 0;
+    white-space: pre; overflow-x: auto; line-height: 1.7;
+  }
+  pre.code .cl { display: block; padding: 0 4px; border-radius: 4px; transition: background 120ms ease; }
+  pre.code .cl.hot { background: rgba(124,196,255,0.16); }
+  pre.code .cmt { color: var(--dim); }
+  pre.code .kw { color: var(--accent-2); }
+  .formula { font-family: ui-monospace, monospace; font-size: 13.5px; color: var(--text); margin: 0 0 14px; line-height: 2; }
+  .formula .term { padding: 1px 5px; border-radius: 5px; cursor: default; transition: background 120ms ease; }
+  .formula .term.cos { color: var(--c0); }
+  .formula .term.sin { color: var(--c1); }
+  .formula .term.hot { background: rgba(255,255,255,0.08); }
+  .seg-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top: 4px; }
+  .seg-toggle button { background: transparent; color: var(--muted); border: 0; padding: 7px 13px; cursor: pointer; font-size: 12px; font-family: ui-monospace, monospace; }
+  .seg-toggle button.on { background: var(--accent); color: #0b1320; font-weight: 700; }
+
+  .closing strong { color: var(--text); }
+  .closing code { display: inline; padding: 1px 6px; color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>RoPE — turn the arrow, don't add to it</h1>
+  <p>
+    You already know one way to tell a model <em>where</em> a token sits: <span class="you">add a position vector</span>
+    to its embedding — <code style="color:var(--accent-2)">x = token + position</code>. <span class="tag">RoPE</span>
+    does it differently: instead of <em>adding</em> something on, it <em>rotates</em> the query &amp; key vectors by an
+    angle that grows with position. Four scenes build the whole idea from that one swap — <em>add → turn</em> — starting
+    exactly where you already are. <em>Drag, slide, and let things spin.</em>
+  </p>
+</header>
+
+<main>
+
+  <!-- SCENE 1 -->
+  <section data-scene="s1">
+    <div class="scene-no"><b>1</b> add a position, or turn the arrow?</div>
+    <div class="panel">
+      <div class="dual">
+        <div class="col">
+          <div class="colcap">the way you know — ADD</div>
+          <svg id="s1add" width="300" height="300" viewBox="0 0 300 300"></svg>
+          <div class="collen add">resulting length |token + position| = <b id="s1addlen">—</b></div>
+        </div>
+        <div class="col turn">
+          <div class="colcap">RoPE — TURN</div>
+          <svg id="s1turn" width="300" height="300" viewBox="0 0 300 300"></svg>
+          <div class="collen">length after rotating = <b id="s1turnlen">1.00</b></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="ctl">
+          <label>position <span class="val" id="s1pval">0</span></label>
+          <input type="range" id="s1p" min="0" max="7" step="1" value="0" aria-label="position" />
+        </div>
+        <button id="s1step" class="btn">step +1 ↻</button>
+        <span class="hint">one slider drives both — same position, two different operations</span>
+      </div>
+      <p class="scene-cap">
+        <b>Adding</b> a position vector pushes the tip to a new spot — it drifts <em>off</em> the circle and its length
+        lurches around (watch the purple readout). The token's size, which carries its <em>meaning</em>, gets disturbed.
+        <b>Turning</b> spins the very same arrow along the circle: new heading, <em>length never changes</em>. Position
+        becomes pure <b>angle</b>.
+      </p>
+      <div class="badges">
+        <span class="badge">one 2D plane shown — a real head has 32 of them (Scene 3)</span>
+        <span class="badge warn">RoPE turns Q &amp; K inside every attention layer — not once at the input like additive PE</span>
+      </div>
+      <p class="footnote">
+        Drawn with a sinusoidal position vector — a fixed-length arrow whose direction turns with position. The point is
+        general, not a rigged contrast: <em>adding</em> any position vector changes the total length, while
+        <em>turning</em> never does.
+      </p>
+      <div class="hook">
+        Turning keeps the vector intact — nice. <b>But the model never looks at one arrow alone.</b> It only ever
+        <b>compares two</b> tokens. So does a turn even survive being compared? →
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 2 -->
+  <section data-scene="s2">
+    <div class="scene-no"><b>2</b> turn both — only the gap survives</div>
+    <div class="panel">
+      <p class="scene-cap" style="margin:0 0 18px">
+        When attention compares two tokens, each one becomes a <b style="color:var(--c0)">query q</b> (the asker) and a
+        <b style="color:var(--c1)">key k</b> (the answerer). The score is just <b>how aligned</b> q and k point — and the
+        green bar below is k's <em>shadow</em> on q, whose length <em>is</em> that alignment (its cosine).
+      </p>
+      <div class="center-stage">
+        <svg id="s2plane" width="340" height="340" viewBox="0 0 340 340"></svg>
+      </div>
+      <div class="strip" id="s2strip"></div>
+      <div class="controls">
+        <div class="ctl">
+          <label>query <span style="color:var(--c0)">q</span> at position m <span class="val" id="s2mval">1</span></label>
+          <input type="range" id="s2m" min="0" max="7" step="1" value="1" aria-label="query position m" />
+        </div>
+        <div class="ctl">
+          <label>key <span style="color:var(--c1)">k</span> at position n <span class="val" id="s2nval">5</span></label>
+          <input type="range" id="s2n" class="key" min="0" max="7" step="1" value="5" aria-label="key position n" />
+        </div>
+        <button id="s2slide" class="btn">▶ slide both forward</button>
+      </div>
+      <div class="readouts">
+        <div class="readout"><span class="lbl">gap n − m</span><span id="s2gap" class="num">4</span></div>
+        <div class="readout"><span class="lbl">angle between = (n−m) × θ</span><span id="s2ang" class="num">—</span></div>
+        <div class="readout score" id="s2box"><span class="lbl">how aligned = cos((n−m) × θ)</span><span id="s2cos" class="num">—</span></div>
+        <div class="readout" id="s2flash" style="opacity:0; color:var(--good); border-color:var(--good)">nothing changed ✓</div>
+      </div>
+      <div class="scorebar-wrap">
+        <div class="scorebar"><div class="marker" id="s2marker"></div></div>
+        <div class="scorebar-axis"><span>−1 (opposite)</span><span>0</span><span>+1 (aligned)</span></div>
+      </div>
+      <p class="scene-cap">
+        Attention compares two tokens by <b>how aligned</b> their arrows point — the angle between them. Give <span style="color:var(--c0)">q</span>
+        the turn for position <em>m</em> and <span style="color:var(--c1)">k</span> the turn for position <em>n</em>. Move <em>one</em>
+        and the wedge opens and the score moves. Now <b>slide both forward together</b>: both arrows whirl around, but the
+        angle between them — and the score — <b>stay frozen to the pixel</b>. Attention only ever feels the gap <b>n − m</b>.
+      </p>
+      <button id="s2why" class="btn ghost why-toggle" aria-pressed="false">show why ▸</button>
+      <div class="deriv" id="s2deriv">
+        <span class="step note">attention's score for two tokens is how aligned their arrows are:</span>
+        <span class="step"><span class="q">q</span> · <span class="k">k</span></span>
+        <span class="step note">RoPE turns q by m×θ and k by n×θ before comparing:</span>
+        <span class="step">( turn <span class="q">q</span> by m×θ ) · ( turn <span class="k">k</span> by n×θ )</span>
+        <span class="step note">a turn on each, then compared, = turning just one by the <em>difference</em> (the rest cancels):</span>
+        <span class="step">= <span class="q">q</span> · ( turn <span class="k">k</span> by <b>(n−m)</b>×θ )</span>
+        <span class="step punch">→ the absolute positions m, n drop out — only the gap (n−m) is left.</span>
+      </div>
+      <p class="footnote">
+        Lengths are pinned to 1 here so the score <em>is</em> the cosine; the real score sums |q||k|·cos over all 32 planes.
+        One representative plane shown — <em>each of the 32 spins at its own speed (next scene)</em>.
+      </p>
+      <div class="badges"><span class="badge go">spun by absolute position → score depends only on relative distance · applied to Q and K only, never V</span></div>
+      <div class="hook">
+        One turn-speed, though: after a full loop the hand points the <b>same way again</b>, so position 1 and position
+        "1 + one whole turn" would look identical. <b>How does RoPE avoid that collision?</b> →
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 3 -->
+  <section data-scene="s3">
+    <div class="scene-no"><b>3</b> one speed lies — a ladder of speeds doesn't</div>
+    <div class="panel">
+      <div class="clockrow-wrap"><svg id="s3clocks" viewBox="0 0 700 170"></svg></div>
+      <div class="controls">
+        <div class="ctl">
+          <label>position <span class="val" id="s3pval">0</span></label>
+          <input type="range" id="s3p" min="0" max="40" step="0.25" value="0" aria-label="position" />
+        </div>
+        <button id="s3play" class="btn ghost on" aria-pressed="true">⏸ pause drift</button>
+        <button id="s3single" class="btn ghost" aria-pressed="false">show one clock only</button>
+        <button id="s3kv" class="btn ghost" aria-pressed="false">+ KV-cache offset</button>
+      </div>
+      <div class="note-line" id="s3note">—</div>
+      <p class="scene-cap">
+        Each clock is one plane, turning at its own speed: fast on the <b>left</b>, slow on the <b>right</b>
+        (<code>θ = pos × 10000<sup>−2p/d</sup></code>). A <em>single</em> clock is a liar — it returns to the exact same
+        hand every full turn, so it can't tell two far-apart positions apart. But read the <b>whole row of hands</b>
+        together and every position gets a <b>signature no other position shares</b>: fast hands split nearby tokens, slow
+        hands track long range.
+      </p>
+      <p class="footnote">
+        Showing 7 of the 32 planes (the liveliest); planes further right are slower still — nearly still over one sentence.
+        <em>KV-cache offset</em> shifts position to <em>start_pos + s</em>, so a decode step keeps spinning from where the
+        cached context left off.
+      </p>
+      <div class="hook">
+        That's the whole idea. <b>So what actually turns these arrows in the engine?</b> →
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 4 -->
+  <section data-scene="s4">
+    <div class="scene-no"><b>4</b> back to the real kernel</div>
+    <div class="panel">
+      <div class="code-split">
+        <div>
+          <div class="seg-toggle" id="s4seg">
+            <button data-mode="inter" class="on">interleaved · (2p, 2p+1)</button>
+            <button data-mode="half">half-split · (p, p+d/2)</button>
+          </div>
+          <div class="footnote" id="s4segnote" style="margin-top:10px">
+            <em>This engine pairs ADJACENT dims (2p, 2p+1)</em> — the llama.cpp convention. Hover a pair.
+          </div>
+          <div class="dimstrip-wrap"><svg id="s4strip" width="660" height="86" viewBox="0 0 660 86"></svg></div>
+          <div class="flex-stage" style="justify-content:flex-start; gap:16px; margin-top:6px">
+            <svg id="s4clock" width="92" height="92" viewBox="0 0 92 92"></svg>
+            <div class="readout" id="s4info" style="min-width:200px">
+              <span class="lbl">plane p — its two dims</span>
+              <span id="s4infotxt">hover a pair on the strip</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <p class="formula">
+            <span class="term sin" data-t="freq">freq<sub>p</sub> = base<sup>−2p/d</sup></span> &nbsp;(base=10000, d=64)<br/>
+            <span class="term" data-t="theta">θ<sub>p</sub> = pos × freq<sub>p</sub></span> &nbsp;(pos = start_pos + s)<br/>
+            <span class="term cos" data-t="cos">a′ = a·cos θ − b·sin θ</span><br/>
+            <span class="term sin" data-t="sin">b′ = a·sin θ + b·cos θ</span>
+          </p>
+          <pre class="code" id="s4code"><span class="cl" data-t="freq">freq  = powf(base, -2.f*p/head_dim);<span class="cmt">  // p in [0, 32)</span></span><span class="cl" data-t="theta">theta = pos * freq;<span class="cmt">                  // pos = start_pos + s</span></span><span class="cl" data-t="cos">a' = a*cosf(theta) - b*sinf(theta);<span class="cmt"> // dim 2p</span></span><span class="cl" data-t="sin">b' = a*sinf(theta) + b*cosf(theta);<span class="cmt"> // dim 2p+1</span></span></pre>
+          <div class="badges">
+            <span class="badge go">applied to Q and K only — never V</span>
+            <span class="badge">GQA: n_heads ≥ n_kv_heads, same θ schedule</span>
+            <span class="badge warn">start_pos offsets pos for the KV-cache</span>
+          </div>
+        </div>
+      </div>
+      <p class="scene-cap">
+        Each plane is one 2D rotation on <b>adjacent dims (2p, 2p+1)</b> — the llama.cpp interleaved convention, not
+        half-split. (Both conventions are the <em>same idea</em> — 2D rotations — differing only in <em>which two dims</em>
+        each plane pairs.) Spin Q and K, leave V alone. <b>That's <code>ops::RoPE</code>.</b>
+      </p>
+    </div>
+  </section>
+
+  <!-- CLOSING -->
+  <section>
+    <div class="scene-no">in one line</div>
+    <div class="panel">
+      <p class="closing" style="margin:0">
+        <strong>Don't add a position — turn the arrow.</strong> Rotating each token's query &amp; key by its
+        <em>absolute</em> position makes attention depend only on the <em>relative</em> gap — and a geometric ladder of
+        spin-speeds gives every position a unique fingerprint. The whole story compiles down to four lines:
+        <code>a′ = a·cos θ − b·sin θ</code>, <code>b′ = a·sin θ + b·cos θ</code> on dims (2p, 2p+1) of Q and K.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const C = {
+    c0: "#7cc4ff", c1: "#f0a35a", c3: "#c099ff", good: "#74d99f", bad: "#ff7676",
+    border: "#2a3142", dim: "#5c6478", accent: "#7cc4ff", accent2: "#f0a35a", muted: "#8a93a6",
+  };
+
+  // honor the OS "reduce motion" preference: start scenes static, keep every control opt-in
+  const REDUCE = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  /* ---------- faithful RoPE constants (mirror src/ops.cpp) ---------- */
+  const BASE = 10000, D = 64, NPLANES = D / 2;        // 32 planes
+  const freqOf = (p) => Math.pow(BASE, (-2 * p) / D); // == 10000^(-p/32)
+  const THETA = 0.5;                                  // representative per-step turn for scenes 1–2
+
+  /* ---------- verified geometry helpers ---------- */
+  // rotate [x,y] by angle a (math convention: 0 -> +x, positive -> CCW)
+  const rot = ([x, y], a) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+  const deg = (a) => (a * 180) / Math.PI;
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function drawBackdrop(svg, cx, cy, r) {
+    svg.appendChild(el("circle", { cx, cy, r, fill: "none", stroke: C.border, "stroke-width": 1.5 }));
+    svg.appendChild(el("line", { x1: cx - r, y1: cy, x2: cx + r, y2: cy, stroke: C.border, "stroke-width": 1, "stroke-dasharray": "3 4", opacity: 0.55 }));
+    svg.appendChild(el("line", { x1: cx, y1: cy - r, x2: cx, y2: cy + r, stroke: C.border, "stroke-width": 1, "stroke-dasharray": "3 4", opacity: 0.55 }));
+  }
+  // arrow from (cx,cy) along angle a, length r. Screen y is flipped (cy - vy) so +angle is CCW.
+  function drawArrow(svg, cx, cy, r, a, color, opacity, width) {
+    const [vx, vy] = rot([r, 0], a);
+    const tx = cx + vx, ty = cy - vy;
+    svg.appendChild(el("line", { x1: cx, y1: cy, x2: tx, y2: ty, stroke: color, "stroke-width": width || 3, "stroke-linecap": "round", opacity: opacity == null ? 1 : opacity }));
+    const head = 9, spread = 0.42;
+    const [h1x, h1y] = rot([head, 0], a + Math.PI - spread);
+    const [h2x, h2y] = rot([head, 0], a + Math.PI + spread);
+    svg.appendChild(el("path", {
+      d: "M " + tx + " " + ty + " L " + (tx + h1x) + " " + (ty - h1y) + " M " + tx + " " + ty + " L " + (tx + h2x) + " " + (ty - h2y),
+      stroke: color, "stroke-width": width || 3, "stroke-linecap": "round", fill: "none", opacity: opacity == null ? 1 : opacity,
+    }));
+    return { tx, ty };
+  }
+  // shaded wedge between angles a0 and a1 (small arc), used to show the angle between two arrows
+  function drawWedge(svg, cx, cy, r, a0, a1, color, op) {
+    const [x0, y0] = rot([r, 0], a0), [x1, y1] = rot([r, 0], a1);
+    const big = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+    const sweep = a1 > a0 ? 0 : 1; // screen y flipped
+    svg.appendChild(el("path", {
+      d: "M " + cx + " " + cy + " L " + (cx + x0) + " " + (cy - y0) + " A " + r + " " + r + " 0 " + big + " " + sweep + " " + (cx + x1) + " " + (cy - y1) + " Z",
+      fill: color, opacity: op == null ? 0.1 : op, stroke: "none",
+    }));
+  }
+  // the "shadow": project a unit arrow at angle aK onto the line of a unit arrow at angle aQ.
+  function drawShadow(svg, cx, cy, r, aQ, aK) {
+    const qh = rot([1, 0], aQ);
+    const kt = rot([r, 0], aK);
+    const cosphi = Math.cos(aK - aQ);
+    const footLen = r * cosphi;
+    const foot = [qh[0] * footLen, qh[1] * footLen];
+    const sx = cx + foot[0], sy = cy - foot[1];
+    const ktx = cx + kt[0], kty = cy - kt[1];
+    const col = cosphi >= 0 ? C.good : C.bad;
+    svg.appendChild(el("line", { x1: ktx, y1: kty, x2: sx, y2: sy, stroke: C.dim, "stroke-width": 1.4, "stroke-dasharray": "3 4", opacity: 0.85 }));
+    svg.appendChild(el("line", { x1: cx, y1: cy, x2: sx, y2: sy, stroke: col, "stroke-width": 7, "stroke-linecap": "round", opacity: 0.85 }));
+    svg.appendChild(el("circle", { cx: sx, cy: sy, r: 4, fill: col }));
+    return cosphi;
+  }
+
+  /* ---------- one shared rAF loop (timestamp-based, framerate independent) ---------- */
+  const animators = new Set();
+  let rafId = null, lastT = 0;
+  function frame(now) {
+    const t = now / 1000;
+    const dt = lastT ? Math.min(0.05, t - lastT) : 0;
+    lastT = t;
+    for (const fn of [...animators]) { if (fn(dt, t) === false) animators.delete(fn); }
+    if (animators.size) rafId = requestAnimationFrame(frame);
+    else { rafId = null; lastT = 0; }
+  }
+  function addAnim(fn) { animators.add(fn); if (!rafId) rafId = requestAnimationFrame(frame); }
+  function removeAnim(fn) { animators.delete(fn); }
+
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  // tween a scalar; returns a canceller. Re-entrant callers should cancel the previous tween first.
+  function tween(from, to, dur, onUpdate, onDone) {
+    let elapsed = 0;
+    const fn = (dt) => {
+      elapsed += dt;
+      const t = dur > 0 ? clamp01(elapsed / dur) : 1;
+      onUpdate(from + (to - from) * easeInOut(t));
+      if (t >= 1) { if (onDone) onDone(); return false; }
+      return true;
+    };
+    addAnim(fn);
+    return () => removeAnim(fn);
+  }
+
+  // per-scene visibility: only animate the scene on screen
+  function onVisible(sceneEl, onIn, onOut) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) onIn(); else onOut(); });
+    }, { threshold: 0.18 });
+    io.observe(sceneEl);
+  }
+
+  const WORDS = ["the", "cat", "sat", "on", "the", "warm", "mat", "."];
+
+  /* ===================================================================
+     SCENE 1 — add a position, or turn the arrow?
+     The reader's model (ADD) beside RoPE (TURN), driven by ONE slider.
+     ADD uses the sinusoidal position vector (a unit vector that itself
+     rotates with position), so the sum's LENGTH visibly wobbles — the
+     honest reason additive PE tangles position into the vector's size.
+     TURN rotates the same arrow: length pinned to 1.
+     =================================================================== */
+  (function scene1() {
+    const svgA = $("s1add"), svgT = $("s1turn");
+    const cx = 150, cy = 150, r = 64;       // unit length r; sum reaches up to 2r = 128 < 150, fits
+    const ALPHA = 0.6;                      // fixed heading of the token's "meaning" arrow
+    const S = { disp: 0, cancel: null };
+
+    function renderAdd() {
+      svgA.innerHTML = "";
+      drawBackdrop(svgA, cx, cy, r);
+      // token "meaning" arrow — fixed
+      drawArrow(svgA, cx, cy, r, ALPHA, C.dim, 0.55, 2.5);
+      const [tx, ty] = rot([r, 0], ALPHA);                 // token tip (math coords, y up)
+      const [px, py] = rot([r, 0], S.disp * THETA);        // sinusoidal position vector (rotates with pos)
+      const sx = tx + px, sy = ty + py;                    // vector sum
+      // position vector drawn tip-to-tail from the token tip (dashed grey)
+      svgA.appendChild(el("line", { x1: cx + tx, y1: cy - ty, x2: cx + sx, y2: cy - sy, stroke: C.dim, "stroke-width": 2, "stroke-dasharray": "4 4", opacity: 0.85 }));
+      // the resulting sum arrow — bold purple, from origin
+      const sumLen = Math.hypot(sx, sy), sumAng = Math.atan2(sy, sx);
+      drawArrow(svgA, cx, cy, sumLen, sumAng, C.c3, 1, 3.5);
+      // labels
+      svgA.appendChild(el("text", { x: cx + tx * 1.18, y: cy - ty * 1.18 + 4, fill: C.dim, "font-size": 11, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = "token";
+      // keep the "token+pos" label inside the 300-wide viewBox at every position
+      const tipX = cx + sx;
+      let lx, anchor;
+      if (tipX > 226) { lx = tipX - 8; anchor = "end"; }        // near the right edge → label leftward
+      else if (tipX < 74) { lx = tipX + 8; anchor = "start"; }  // near the left edge → label rightward
+      else { lx = tipX + (sx >= 0 ? 8 : -8); anchor = sx >= 0 ? "start" : "end"; }
+      svgA.appendChild(el("text", { x: lx, y: cy - sy + 4, fill: C.c3, "font-size": 12, "font-family": "ui-monospace, monospace", "text-anchor": anchor })).textContent = "token+pos";
+      $("s1addlen").textContent = (sumLen / r).toFixed(2);
+    }
+
+    function renderTurn() {
+      svgT.innerHTML = "";
+      drawBackdrop(svgT, cx, cy, r);
+      const ang = S.disp * THETA;
+      drawWedge(svgT, cx, cy, r, 0, ang, C.accent, 0.12);
+      drawArrow(svgT, cx, cy, r, 0, C.dim, 0.4, 2);        // position-0 ghost
+      drawArrow(svgT, cx, cy, r, ang, C.c0, 1, 3.5);       // rotated token
+      const [vx, vy] = rot([r * 1.2, 0], ang);
+      svgT.appendChild(el("text", { x: cx + vx, y: cy - vy + 4, fill: C.c0, "font-size": 12, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = "token";
+      $("s1turnlen").textContent = "1.00";
+    }
+
+    function renderBoth() { renderAdd(); renderTurn(); }
+
+    function setPos(p) {
+      p = Math.max(0, Math.min(7, p));
+      $("s1p").value = p; $("s1pval").textContent = p;
+      const from = S.disp;
+      if (S.cancel) S.cancel();
+      if (REDUCE) { S.disp = p; renderBoth(); return; }
+      S.cancel = tween(from, p, 0.34, (v) => { S.disp = v; renderBoth(); });
+    }
+
+    $("s1p").addEventListener("input", (e) => setPos(+e.target.value));
+    $("s1step").addEventListener("click", () => setPos((+$("s1p").value >= 7) ? 0 : +$("s1p").value + 1));
+    renderBoth();
+  })();
+
+  /* ===================================================================
+     SCENE 2 — turn both, only the gap survives
+     =================================================================== */
+  (function scene2() {
+    const svg = $("s2plane"), cx = 170, cy = 170, r = 128;
+    const S = { m: 1, n: 5, dm: 1, dn: 5, sliding: false, visible: false, acc: 0, cancel: null };
+
+    const strip = $("s2strip");
+    WORDS.forEach((w, i) => {
+      const d = document.createElement("div");
+      d.className = "tok"; d.innerHTML = w + '<span class="ix">' + i + "</span>";
+      strip.appendChild(d);
+    });
+    function paintStrip() {
+      [...strip.children].forEach((c, i) => {
+        c.classList.remove("qsel", "ksel", "both");
+        if (i === S.m && i === S.n) c.classList.add("both");
+        else if (i === S.m) c.classList.add("qsel");
+        else if (i === S.n) c.classList.add("ksel");
+      });
+    }
+
+    function render() {
+      const am = S.dm * THETA, an = S.dn * THETA;
+      svg.innerHTML = "";
+      drawBackdrop(svg, cx, cy, r);
+      drawWedge(svg, cx, cy, r, am, an, C.accent, 0.12);
+      drawShadow(svg, cx, cy, r, am, an);                  // shadow of k onto q's line = the alignment
+      drawArrow(svg, cx, cy, r, am, C.c0, 1, 3.5);         // query
+      drawArrow(svg, cx, cy, r, an, C.c1, 1, 3.5);         // key
+      const qt = rot([r + 16, 0], am), kt = rot([r + 16, 0], an);
+      svg.appendChild(el("text", { x: cx + qt[0], y: cy - qt[1] + 4, fill: C.c0, "font-size": 13, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = "q";
+      svg.appendChild(el("text", { x: cx + kt[0], y: cy - kt[1] + 4, fill: C.c1, "font-size": 13, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = "k";
+      const gap = S.n - S.m, ang = gap * THETA, score = Math.cos(ang);
+      $("s2gap").textContent = gap;
+      $("s2ang").textContent = deg(ang).toFixed(0) + "°";
+      $("s2cos").textContent = score.toFixed(3);
+      $("s2marker").style.left = (clamp01((score + 1) / 2) * 100) + "%";
+    }
+
+    function setMN(m, n, animate) {
+      S.m = Math.max(0, Math.min(7, m)); S.n = Math.max(0, Math.min(7, n));
+      $("s2m").value = S.m; $("s2n").value = S.n;
+      $("s2mval").textContent = S.m; $("s2nval").textContent = S.n;
+      paintStrip();
+      if (S.cancel) S.cancel();
+      if (animate) {
+        const fm = S.dm, fn = S.dn;
+        S.cancel = tween(0, 1, 0.3, (t) => { S.dm = fm + (S.m - fm) * t; S.dn = fn + (S.n - fn) * t; render(); });
+      } else { S.dm = S.m; S.dn = S.n; render(); }
+    }
+
+    function pulse() {
+      const box = $("s2box"), flash = $("s2flash");
+      box.classList.add("pulse"); flash.style.opacity = "1";
+      setTimeout(() => { box.classList.remove("pulse"); flash.style.opacity = "0"; }, 480);
+    }
+
+    // "slide both forward": advance m,n together keeping the gap fixed
+    const loop = (dt) => {
+      S.acc += dt;
+      if (S.acc >= 0.85) {
+        S.acc = 0;
+        const gap = S.n - S.m;
+        let nm = S.m + 1, nn = S.n + 1, wrap = false;
+        if (nn > 7) { nm = 0; nn = gap; wrap = true; }   // wrap, keep gap constant
+        // snap on the wrap step so the arrows don't swing BACKWARD while we flash "nothing changed"
+        setMN(nm, nn, !wrap);
+        if (!wrap) pulse();
+      }
+      return S.sliding && S.visible;
+    };
+    function setSliding(on) {
+      S.sliding = on; S.acc = 0;
+      $("s2slide").textContent = on ? "⏸ stop" : "▶ slide both forward";
+      $("s2slide").classList.toggle("ghost", on);
+      if (on && S.visible) addAnim(loop);
+    }
+    $("s2slide").addEventListener("click", () => setSliding(!S.sliding));
+    $("s2m").addEventListener("input", (e) => { if (S.sliding) setSliding(false); setMN(+e.target.value, S.n, true); });
+    $("s2n").addEventListener("input", (e) => { if (S.sliding) setSliding(false); setMN(S.m, +e.target.value, true); });
+    $("s2why").addEventListener("click", () => {
+      const d = $("s2deriv"), open = d.classList.toggle("open");
+      $("s2why").textContent = open ? "hide why ▾" : "show why ▸";
+      $("s2why").setAttribute("aria-pressed", open);
+    });
+
+    onVisible(svg.closest("[data-scene]"),
+      () => { S.visible = true; if (S.sliding) addAnim(loop); },
+      () => { S.visible = false; });
+    setMN(1, 5, false);
+  })();
+
+  /* ===================================================================
+     SCENE 3 — one speed lies; a ladder of speeds doesn't
+     A row of mini-clocks (planes), fast left -> slow right. The fast
+     clock's "ghost" hand one wavelength back lands on the same angle
+     (aliasing). Read all hands together = a unique fingerprint.
+     =================================================================== */
+  (function scene3() {
+    const svg = $("s3clocks");
+    const PLANES = [0, 1, 2, 4, 7, 12, 20];        // geometric spread: fast -> slow
+    const N = PLANES.length, POSMAX = 40, START_OFF = 128;
+    const S = { pos: 0, playing: !REDUCE, single: false, useStart: false, visible: false };
+
+    const cxOf = (i) => 50 + i * 100;
+    const cy = 70, r = 30;
+
+    function render() {
+      const off = S.useStart ? START_OFF : 0;
+      svg.innerHTML = "";
+      for (let i = 0; i < N; i++) {
+        const p = PLANES[i], f = freqOf(p), cx = cxOf(i);
+        const ang = (off + S.pos) * f;
+        const dim = S.single && i !== 0;
+        const col = dim ? "#2c3343" : (i === 0 ? C.c1 : C.accent);
+        // dial face
+        svg.appendChild(el("circle", { cx, cy, r, fill: "none", stroke: dim ? "#1c2230" : C.border, "stroke-width": 1.5 }));
+        svg.appendChild(el("line", { x1: cx + r - 5, y1: cy, x2: cx + r, y2: cy, stroke: dim ? "#1c2230" : "#3a4256", "stroke-width": 1.5 })); // angle-0 tick
+        // aliasing on the fast clock (single mode): the hand one full turn (2π) back lands on the IDENTICAL heading,
+        // so two different positions become indistinguishable. Draw a wide echo halo + a rim dot to make it land.
+        const wl0 = (2 * Math.PI) / f;
+        const colliding = S.single && i === 0 && (off + S.pos) - wl0 > 0;
+        if (colliding) drawArrow(svg, cx, cy, r - 3, ang, "rgba(255,255,255,0.28)", 1, 9); // echo of the earlier position
+        drawArrow(svg, cx, cy, r - 3, ang, col, 1, 2.4);
+        if (colliding) {
+          const [tipx, tipy] = rot([r - 3, 0], ang);
+          svg.appendChild(el("circle", { cx: cx + tipx, cy: cy - tipy, r: 4, fill: col }));
+          svg.appendChild(el("text", { x: cx, y: cy + r + 34, fill: C.accent2, "font-size": 10.5, "font-family": "ui-monospace, monospace", "text-anchor": "middle" }))
+            .textContent = "pos " + (off + S.pos).toFixed(1) + " ≡ " + ((off + S.pos) - wl0).toFixed(1);
+        }
+        // labels
+        svg.appendChild(el("text", { x: cx, y: cy + r + 18, fill: dim ? "#3a4256" : C.muted, "font-size": 11, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = "p=" + p;
+        svg.appendChild(el("text", { x: cx, y: cy - r - 8, fill: dim ? "#3a4256" : C.muted, "font-size": 9.5, "font-family": "ui-monospace, monospace", "text-anchor": "middle" })).textContent = (i === 0 ? "fast" : i === N - 1 ? "slow" : "");
+      }
+      annotate(off);
+    }
+
+    function annotate(off) {
+      $("s3pval").textContent = S.pos.toFixed(2) + (S.useStart ? "  → pos " + (off + S.pos).toFixed(0) : "");
+      const f0 = freqOf(0), wl = (2 * Math.PI) / f0, note = $("s3note");
+      if (S.single) {
+        const back = (off + S.pos) - wl;
+        note.innerHTML = back > 0
+          ? 'One clock is a liar: position <span class="hi">' + (off + S.pos).toFixed(1) + '</span> and position <span class="hi">' + back.toFixed(1) + '</span> show the <span class="hi">identical</span> hand (the faint ghost). One speed can’t pin down position.'
+          : 'One clock alone repeats every <span class="hi">' + wl.toFixed(1) + '</span> steps — drift further to see a position collide with an earlier one.';
+        note.classList.add("hot");
+      } else {
+        note.innerHTML = 'Seven hands, seven speeds → this exact <span class="hi">row of hands</span> is a fingerprint no other position shares.';
+        note.classList.remove("hot");
+      }
+    }
+
+    function setPos(p) { S.pos = Math.max(0, Math.min(POSMAX, p)); $("s3p").value = S.pos; render(); }
+    const loop = (dt) => { S.pos += 4 * dt; if (S.pos > POSMAX) S.pos -= POSMAX; $("s3p").value = S.pos; render(); return S.playing && S.visible; };
+    function setPlaying(p) {
+      S.playing = p;
+      $("s3play").textContent = p ? "⏸ pause drift" : "▶ drift";
+      $("s3play").classList.toggle("on", p);
+      $("s3play").setAttribute("aria-pressed", p);
+      if (p && S.visible) addAnim(loop);
+    }
+
+    $("s3p").addEventListener("input", (e) => { setPlaying(false); setPos(+e.target.value); });
+    $("s3play").addEventListener("click", () => setPlaying(!S.playing));
+    $("s3single").addEventListener("click", () => {
+      S.single = !S.single; $("s3single").classList.toggle("on", S.single);
+      $("s3single").setAttribute("aria-pressed", S.single);
+      $("s3single").textContent = S.single ? "show all clocks" : "show one clock only";
+      // if we're paused before the first full turn, jump to where the collision is already on-screen
+      if (S.single && !S.playing) {
+        const off = S.useStart ? START_OFF : 0, wl = (2 * Math.PI) / freqOf(0);
+        if (off + S.pos <= wl) setPos(wl + 1.5);
+      }
+      render();
+    });
+    $("s3kv").addEventListener("click", () => {
+      S.useStart = !S.useStart; $("s3kv").classList.toggle("on", S.useStart);
+      $("s3kv").setAttribute("aria-pressed", S.useStart);
+      $("s3kv").textContent = S.useStart ? "− KV-cache offset" : "+ KV-cache offset"; render();
+    });
+
+    if (REDUCE) setPlaying(false);   // sync the button label/aria when motion is suppressed
+    onVisible(svg.closest("[data-scene]"),
+      () => { S.visible = true; if (S.playing) addAnim(loop); },
+      () => { S.visible = false; });
+    render();
+  })();
+
+  /* ===================================================================
+     SCENE 4 — back to the real kernel
+     =================================================================== */
+  (function scene4() {
+    const strip = $("s4strip"), clock = $("s4clock");
+    const cellW = 9, gap = 1, x0 = 6, y0 = 30, cellH = 30;
+    let mode = "inter", hoverP = -1;
+
+    function dimX(i) { return x0 + i * (cellW + gap); }
+    function pairDims(p) { return mode === "inter" ? [2 * p, 2 * p + 1] : [p, p + NPLANES]; }
+
+    function renderStrip() {
+      strip.innerHTML = "";
+      for (let i = 0; i < D; i++) {
+        const isHot = hoverP >= 0 && pairDims(hoverP).indexOf(i) >= 0;
+        strip.appendChild(el("rect", {
+          x: dimX(i), y: y0, width: cellW, height: cellH, rx: 2,
+          fill: isHot ? "#7cc4ff" : "#1c2130", stroke: "#2a3142", "stroke-width": 1,
+          opacity: isHot ? 1 : 0.9,
+        }));
+      }
+      for (let p = 0; p < NPLANES; p++) {
+        const [a, b] = pairDims(p);
+        const hot = p === hoverP;
+        if (mode === "inter") {
+          const xa = dimX(a) + cellW / 2, xb = dimX(b) + cellW / 2;
+          strip.appendChild(el("path", {
+            d: "M " + xa + " " + (y0 + cellH + 4) + " V " + (y0 + cellH + 9) + " H " + xb + " V " + (y0 + cellH + 4),
+            stroke: hot ? "#7cc4ff" : "#3a4256", "stroke-width": hot ? 2 : 1, fill: "none",
+          }));
+        } else {
+          const xa = dimX(a) + cellW / 2, xb = dimX(b) + cellW / 2, mid = (xa + xb) / 2;
+          strip.appendChild(el("path", {
+            d: "M " + xa + " " + (y0 - 4) + " Q " + mid + " " + (y0 - 16 - (p % 6) * 1.6) + " " + xb + " " + (y0 - 4),
+            stroke: hot ? "#7cc4ff" : "rgba(192,153,255,0.35)", "stroke-width": hot ? 2 : 1, fill: "none",
+          }));
+        }
+        const hx = Math.min(dimX(a), dimX(b)), hw = Math.abs(dimX(b) - dimX(a)) + cellW;
+        const hit = el("rect", { x: hx, y: y0 - 24, width: hw, height: cellH + 40, fill: "transparent" });
+        hit.style.cursor = "pointer";
+        hit.addEventListener("pointerenter", () => { hoverP = p; renderStrip(); showPlane(p); });
+        strip.appendChild(hit);
+      }
+      strip.appendChild(el("text", { x: x0, y: 16, fill: C.muted, "font-size": 11, "font-family": "ui-monospace, monospace" }))
+        .textContent = "head_dim = 64  →  dims 0 … 63   (" + (mode === "inter" ? "adjacent pairs (2p, 2p+1)" : "half-split pairs (p, p+32)") + ")";
+    }
+
+    let clockP = 0, clockAng = 0, clockVis = false;
+    function showPlane(p) {
+      clockP = p;
+      const [a, b] = pairDims(p), f = freqOf(p), wl = (2 * Math.PI) / f;
+      $("s4infotxt").innerHTML = "p=" + p + " → dims (" + a + ", " + b + ")<br/>freq=" + f.toPrecision(3) +
+        " · λ≈" + (wl >= 1000 ? wl.toFixed(0) : wl.toFixed(1)) + " positions";
+    }
+    function drawClock() {
+      clock.innerHTML = "";
+      drawBackdrop(clock, 46, 46, 34);
+      drawArrow(clock, 46, 46, 34, clockAng, clockP === 0 ? C.c1 : C.c0, 1, 2.5);
+    }
+    const clockLoop = (dt) => { clockAng += (0.5 + freqOf(clockP) * 6) * dt; drawClock(); return clockVis; };
+
+    $("s4seg").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      mode = b.dataset.mode;
+      [...$("s4seg").children].forEach((c) => c.classList.toggle("on", c === b));
+      $("s4segnote").innerHTML = mode === "inter"
+        ? "<em>This engine pairs ADJACENT dims (2p, 2p+1)</em> — the llama.cpp convention. Hover a pair."
+        : "<em>Half-split (p, p+32)</em> is HuggingFace's convention — a different pairing this engine does NOT use.";
+      renderStrip();
+    });
+
+    function bind(term) {
+      [...document.querySelectorAll('.formula .term')].forEach((t) => t.classList.toggle("hot", t.dataset.t === term));
+      [...document.querySelectorAll('#s4code .cl')].forEach((c) => c.classList.toggle("hot", c.dataset.t === term));
+    }
+    document.querySelectorAll('.formula .term, #s4code .cl').forEach((node) => {
+      node.addEventListener("pointerenter", () => bind(node.dataset.t));
+      node.addEventListener("pointerleave", () => bind(null));
+    });
+
+    let walkP = 0, walkAcc = 0, visible = false;
+    const walk = (dt) => {
+      walkAcc += dt;
+      if (walkAcc > 0.7) { walkAcc = 0; walkP = (walkP + 1) % NPLANES; hoverP = walkP; renderStrip(); showPlane(walkP); }
+      return visible && hoverP === walkP;
+    };
+
+    // when the pointer leaves the strip, resume the idle walk from wherever the last hover left off
+    strip.addEventListener("pointerleave", () => { if (visible && !REDUCE) { walkP = hoverP; walkAcc = 0; addAnim(walk); } });
+
+    onVisible(strip.closest("[data-scene]"),
+      () => { visible = true; clockVis = true; hoverP = walkP; renderStrip(); showPlane(walkP); if (!REDUCE) { addAnim(clockLoop); addAnim(walk); } },
+      () => { visible = false; clockVis = false; });
+    renderStrip(); showPlane(0); drawClock();
+  })();
+})();
+</script>
+</body>
+</html>

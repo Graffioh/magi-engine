@@ -1,5 +1,7 @@
 #include "ops.h"
 
+#include "utils.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -58,7 +60,38 @@ void RMSNorm_1d(const float* IN_data, const float* W_data, float* OUT_data, int 
     }
 }
 
-}  // anonymous namespace
+void compute_rope_pair(float* tensor_data, int head_base, int pair, const float cos_theta, const float sin_theta) {
+    int   a_pos        = head_base + 2 * pair;
+    int   b_pos        = head_base + (2 * pair) + 1;
+    float t_a_og       = tensor_data[a_pos];
+    float t_b_og       = tensor_data[b_pos];
+    tensor_data[a_pos] = t_a_og * cos_theta - t_b_og * sin_theta;
+    tensor_data[b_pos] = t_a_og * sin_theta + t_b_og * cos_theta;
+}
+
+void apply_rope(float*           tensor_data,
+                const int        seq_len,
+                const int        n_heads,
+                const int        head_dim,
+                const int        start_pos,
+                const RopeCache& rc) {
+    for (int s = 0; s < seq_len; ++s) {
+        const int pos = start_pos + s;
+        for (int h = 0; h < n_heads; ++h) {
+            const int head_base = ((s * n_heads) + h) * head_dim;
+            for (int p = 0; p < head_dim / 2; ++p) {
+                const float cos_theta = rc.cos_cache()[pos * head_dim / 2 + p];
+                const float sin_theta = rc.sin_cache()[pos * head_dim / 2 + p];
+
+                // t_a' = t_a*cos(theta) - t_b*sin(theta)
+                // t_b' = t_a*sin(theta) + t_b*cos(theta)
+                compute_rope_pair(tensor_data, head_base, p, cos_theta, sin_theta);
+            }
+        }
+    }
+}
+
+}  // namespace
 
 namespace ops {
 
@@ -191,6 +224,22 @@ void embed(const std::vector<int>& ids, const Tensor& We, Tensor& OUT) {
 
         std::memcpy(&out_data[i * hidden_dim], &w_data[id * hidden_dim], hidden_dim * sizeof(float));
     }
+}
+
+// for each token, we pick an head
+//   for each head, we pick a pair of head dimensions (in Q and K)
+//     for each pair of head dimensions, we perform magic with rotations
+//
+// Note: with GQA, we need to take in count that multiple Qs can share the same KV -> (#Q_heads > #KV_heads)
+void RoPE(Tensor& Q, Tensor& K, int head_dim, int start_pos, const RopeCache& rc) {
+    assert(head_dim % 2 == 0);
+
+    int seq_len    = Q.dim(0);
+    int n_heads    = Q.dim(-1) / head_dim;
+    int n_kv_heads = K.dim(-1) / head_dim;
+
+    apply_rope(Q.data_ptr(), seq_len, n_heads, head_dim, start_pos, rc);
+    apply_rope(K.data_ptr(), seq_len, n_kv_heads, head_dim, start_pos, rc);
 }
 
 }  // namespace ops

@@ -113,7 +113,7 @@ passes against the toy reference.
 
 Scope: the hardest layer in the stack, built against the Stage 3 scaffolding.
 
-- [ ] RoPE op: precomputed `inv_freq`, rotates pairs of dims on Q and K per
+- [x] RoPE op: precomputed `inv_freq`, rotates pairs of dims on Q and K per
       head. Standalone, tested against golden.
 - [ ] Q / K / V projections (three `LinearLayer`s; fused into one matmul
       later if useful).
