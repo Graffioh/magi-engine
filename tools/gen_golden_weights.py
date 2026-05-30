@@ -107,6 +107,42 @@ def rope(x, n_heads, head_dim, base=10000, start_pos=0):
     return out
 
 
+def attention(x, wq, wk, wv, wo, n_heads, n_kv_heads, head_dim, base=10000, start_pos=0):
+    """One attention layer. Mirrors AttentionLayer::forward + ops::attn in C++:
+    project Q/K/V -> RoPE(Q,K) -> per-head causal scaled-dot-product attention with
+    grouped-query KV sharing -> output projection. float32 throughout.
+
+        Q = rope(x @ Wq^T) ; K = rope(x @ Wk^T) ; V = x @ Wv^T
+        per query head h, sharing KV head kv = h // (n_heads // n_kv_heads):
+            scores = (Q_h @ K_kv^T) / sqrt(head_dim)        # (T, T)
+            scores[i, j>i] = -1e10                           # causal mask (no peeking ahead)
+            out_h = softmax(scores) @ V_kv                   # (T, head_dim)
+        out = concat(out_h over h) @ Wo^T                    # (T, hidden)
+    """
+    T = x.shape[0]
+    Q = rope(linear(x, wq), n_heads, head_dim, base, start_pos)     # (T, n_heads*head_dim)
+    K = rope(linear(x, wk), n_kv_heads, head_dim, base, start_pos)  # (T, n_kv_heads*head_dim)
+    V = linear(x, wv)                                               # (T, n_kv_heads*head_dim)
+
+    scale = np.float32(1.0) / np.sqrt(np.float32(head_dim))
+    group = n_heads // n_kv_heads
+    out = np.zeros((T, n_heads * head_dim), dtype=np.float32)
+    for h in range(n_heads):
+        kv = h // group
+        Q_h = Q[:, h * head_dim:(h + 1) * head_dim]      # (T, head_dim)
+        K_kv = K[:, kv * head_dim:(kv + 1) * head_dim]   # (T, head_dim)
+        V_kv = V[:, kv * head_dim:(kv + 1) * head_dim]   # (T, head_dim)
+
+        scores = ((Q_h @ K_kv.T).astype(np.float32) * scale).astype(np.float32)  # (T, T)
+        scores[np.triu(np.ones((T, T), dtype=bool), k=1)] = np.float32(-1e10)    # mask j > i
+        scores = (scores - scores.max(axis=-1, keepdims=True)).astype(np.float32)
+        e = np.exp(scores).astype(np.float32)
+        weights = (e / e.sum(axis=-1, keepdims=True)).astype(np.float32)         # (T, T)
+        out[:, h * head_dim:(h + 1) * head_dim] = (weights @ V_kv).astype(np.float32)
+
+    return linear(out, wo)  # (T, hidden)
+
+
 # ----------------------------------------------------------------------------
 # Weight generation. One fixed-seed Generator -> fully reproducible.
 # ----------------------------------------------------------------------------
@@ -174,7 +210,19 @@ def make_goldens(w):
     g["golden.rope_q_out"] = rope(q_in, N_HEADS, HEAD_DIM)
     g["golden.rope_k_out"] = rope(k_in, N_KV_HEADS, HEAD_DIM)
 
-    # TODO (Stage 4): g["golden.attn_out"] once attention exists in C++.
+    # Full attention layer applied directly to the embeddings, layer 0 weights.
+    # Exercises projections -> RoPE -> GQA causal SDPA -> output projection end-to-end.
+    g["golden.attn_out"] = attention(
+        x,
+        w["layer0.attn.q.weight"],
+        w["layer0.attn.k.weight"],
+        w["layer0.attn.v.weight"],
+        w["layer0.attn.o.weight"],
+        N_HEADS,
+        N_KV_HEADS,
+        HEAD_DIM,
+    )
+
     # TODO (Stage 5): g["golden.logits"].
     return g
 

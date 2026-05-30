@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GQA — Grouped-Query Attention</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #131722;
+    --ink: #e6e9ef;
+    --muted: #9aa4b2;
+    --accent: #6ea8fe;
+    --accent2: #b58cff;
+    --line: #2a3142;
+    --good: #5fd08a;
+    --warn: #ffb454;
+    --mono: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 {
+    font-size: 2.1rem;
+    margin: 6px 0 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .lede { color: var(--muted); font-size: 1.08rem; margin-bottom: 36px; max-width: 760px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px 30px;
+    margin-bottom: 22px;
+  }
+  h2 { font-size: 1.3rem; margin: 0 0 14px; color: var(--accent2); }
+  p { margin: 0 0 12px; }
+  code { font-family: var(--mono); color: var(--accent); font-size: 0.92em; }
+  em { color: var(--ink); font-style: normal; font-weight: 600; }
+  .formula {
+    background: var(--bg);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    margin: 16px 0;
+    border-radius: 0 8px 8px 0;
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+  .muted { color: var(--muted); font-size: 0.92rem; }
+  .mha { color: var(--warn); font-weight: 600; }
+  .gqa { color: var(--accent2); font-weight: 600; }
+  .mqa { color: var(--good); font-weight: 600; }
+
+  .controls { display: flex; gap: 32px; flex-wrap: wrap; align-items: center; margin: 6px 0 18px; }
+  .ctl { display: flex; flex-direction: column; gap: 6px; }
+  .ctl label { color: var(--muted); font-size: 0.85rem; }
+  .ctl .v { color: var(--accent2); font-weight: 700; font-family: var(--mono); }
+  input[type=range] { width: 220px; accent-color: var(--accent); }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+  canvas { display: block; width: 100%; height: auto; margin: 6px 0; }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  td.num { font-family: var(--mono); }
+  .bar { height: 9px; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .nav { margin-bottom: 18px; }
+  .nav a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+  .nav a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav"><a href="rope_visualization.html">← rope</a> &nbsp;·&nbsp; <a href="attention_visualization.html">attention →</a></div>
+  <h1>Grouped-Query Attention</h1>
+  <p class="lede">Keep every query head, but let groups of them <em>share</em> one key/value head.
+  That single trade is what keeps the KV cache small enough to decode long sequences.</p>
+
+  <div class="panel">
+    <h2>The idea</h2>
+    <p>In plain <span class="mha">multi-head attention (MHA)</span> every query head owns a matching
+    key head and value head. During autoregressive decoding we cache K and V for every past token, so
+    the cache grows with the <em>number of heads</em> — and at long context that cache, not the weights,
+    is what dominates memory.</p>
+    <p><span class="gqa">GQA</span> splits the difference: keep all <code>n_heads</code> query heads,
+    but only <code>n_kv_heads</code> key/value heads. Each KV head is shared by a contiguous
+    <em>group</em> of query heads.</p>
+    <div class="formula">group_size = n_heads / n_kv_heads      // must divide evenly
+query head h  reads from  kv head  h / group_size</div>
+    <p class="muted"><span class="mha">MHA</span> is GQA with <code>n_kv_heads = n_heads</code>.
+    <span class="mqa">MQA</span> (multi-query) is GQA with <code>n_kv_heads = 1</code>. magi-engine's
+    golden test config is the MQA extreme — <code>n_heads = 2</code>, <code>n_kv_heads = 1</code>,
+    <code>head_dim = 4</code> — small enough to print whole tensors while still exercising the shared-KV
+    path; the eventual target model uses true GQA with several KV heads.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Interactive · which KV head does each query head read?</h2>
+    <p class="muted">Query heads on top, KV heads below. Same colour = same group. Defaults to a clear
+    GQA split (8 → 2); dial <code>kv heads</code> down to 1 for the golden test's MQA case, or up to
+    <code>query heads</code> for plain MHA.</p>
+    <div class="controls">
+      <div class="ctl">
+        <label>query heads &nbsp; <span class="v" id="qLabel">8</span></label>
+        <input type="range" id="qHeads" min="1" max="16" value="8">
+      </div>
+      <div class="ctl">
+        <label>kv heads &nbsp; <span class="v" id="kvLabel">2</span></label>
+        <input type="range" id="kvHeads" min="1" max="16" value="2">
+      </div>
+      <div class="ctl">
+        <label>mode</label>
+        <span class="v" id="modeLabel"></span>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span>query head (Q)</span>
+      <span><span class="sw" style="background:var(--accent2)"></span>kv head (K, V) — the shared resource</span>
+    </div>
+    <canvas id="diagram" width="1000" height="340"></canvas>
+    <p class="muted" id="diagramNote"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Why it matters · KV cache size</h2>
+    <p>Per token, per layer, the KV cache holds <code>2 · n_kv_heads · head_dim</code> floats — the
+    factor of 2 is K and V. Halving the KV heads halves the cache, with little measured quality loss.</p>
+    <table id="memTable">
+      <thead><tr><th>Scheme</th><th>n_kv_heads</th><th>floats / token / layer</th><th>vs MHA</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="memNote"></p>
+  </div>
+
+  <div class="panel">
+    <h2>In the magi-engine code</h2>
+    <p>The whole mechanism is one integer division in the attention loop — query head <code>h</code>
+    is mapped to its KV head, then K/V slices are gathered from that shared head:</p>
+    <div class="formula">// src/ops.cpp — ops::attn
+for (int h = 0; h &lt; n_heads; ++h) {
+    const int kv_head = h / (n_heads / n_kv_heads);   // &lt;- the group mapping
+    build_head_slice(q_data_ptr, Q_slice, T, n_heads    * head_dim, h,       head_dim);
+    build_head_slice(k_data_ptr, K_slice, T, n_kv_heads * head_dim, kv_head, head_dim);
+    ...
+}</div>
+    <p class="muted">RoPE is applied with the matching head counts too — <code>n_heads</code> for Q,
+    <code>n_kv_heads</code> for K (see <a href="rope_visualization.html" style="color:var(--accent)">rope</a>) —
+    so a query and the KV head it shares are rotated on the same θ schedule.</p>
+  </div>
+</div>
+
+<script>
+const HEAD_DIM = 4; // magi-engine golden test config (head_dim = 4)
+
+const qSlider  = document.getElementById('qHeads');
+const kvSlider = document.getElementById('kvHeads');
+const qLabel   = document.getElementById('qLabel');
+const kvLabel  = document.getElementById('kvLabel');
+const modeLabel= document.getElementById('modeLabel');
+const note     = document.getElementById('diagramNote');
+const canvas   = document.getElementById('diagram');
+const ctx      = canvas.getContext('2d');
+
+const css = getComputedStyle(document.documentElement);
+const C = {
+  accent:  css.getPropertyValue('--accent').trim(),
+  accent2: css.getPropertyValue('--accent2').trim(),
+  ink:     css.getPropertyValue('--ink').trim(),
+  bg:      css.getPropertyValue('--bg').trim(),
+  muted:   css.getPropertyValue('--muted').trim(),
+};
+
+// Distinct hue per group so the grouping reads at a glance.
+function groupColor(g, total, alpha = 1) {
+  const hue = total <= 1 ? 265 : 210 + (g / total) * 110; // blue -> purple sweep
+  return `hsla(${hue}, 70%, 66%, ${alpha})`;
+}
+const divides = (q, kv) => q % kv === 0;
+
+// Crisp rendering on hi-dpi without changing layout size.
+function setupHiDPI() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 1000;
+  const h = 340;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w, h };
+}
+
+function draw() {
+  let q = +qSlider.value;
+  let kv = +kvSlider.value;
+  if (kv > q) { kv = q; kvSlider.value = q; } // KV heads can't exceed query heads
+  qLabel.textContent = q;
+  kvLabel.textContent = kv;
+
+  const { w: W, h: H } = setupHiDPI();
+  ctx.clearRect(0, 0, W, H);
+
+  const valid = divides(q, kv);
+  const groupSize = q / kv;
+  const kvOf = h => valid ? Math.floor(h / groupSize) : Math.floor(h * kv / q);
+
+  // mode label
+  if (kv === q)      modeLabel.innerHTML = '<span class="mha">MHA</span>';
+  else if (kv === 1) modeLabel.innerHTML = '<span class="mqa">MQA</span>';
+  else               modeLabel.innerHTML = '<span class="gqa">GQA</span>';
+
+  const topY = 78, botY = H - 78, margin = 60;
+  const qStep  = (W - 2 * margin) / Math.max(q, 1);
+  const kvStep = (W - 2 * margin) / Math.max(kv, 1);
+  const qX  = i => margin + qStep  * (i + 0.5);
+  const kvX = i => margin + kvStep * (i + 0.5);
+  const r   = Math.min(19, qStep / 2.4);
+  const kvR = Math.min(25, kvStep / 2.4);
+
+  ctx.font = '13px ui-sans-serif, system-ui, sans-serif';
+  ctx.fillStyle = C.muted;
+  ctx.textAlign = 'left';
+  ctx.fillText('query heads', margin - 12, topY - 34);
+  ctx.fillText('kv heads',    margin - 12, botY + 44);
+
+  // edges first (behind nodes)
+  for (let h = 0; h < q; h++) {
+    const g = kvOf(h);
+    ctx.strokeStyle = groupColor(g, kv, 0.5);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(qX(h), topY + r);
+    ctx.lineTo(kvX(g), botY - kvR);
+    ctx.stroke();
+  }
+
+  // query nodes
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let h = 0; h < q; h++) {
+    const g = kvOf(h);
+    ctx.beginPath();
+    ctx.arc(qX(h), topY, r, 0, Math.PI * 2);
+    ctx.fillStyle = groupColor(g, kv, 0.92);
+    ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = C.bg; ctx.stroke();
+    if (q <= 12) {
+      ctx.fillStyle = C.bg;
+      ctx.font = 'bold 11px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+      ctx.fillText('q' + h, qX(h), topY);
+    }
+  }
+
+  // kv nodes (larger — shared resource)
+  for (let g = 0; g < kv; g++) {
+    ctx.beginPath();
+    ctx.arc(kvX(g), botY, kvR, 0, Math.PI * 2);
+    ctx.fillStyle = groupColor(g, kv, 0.97);
+    ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = C.bg; ctx.stroke();
+    ctx.fillStyle = C.bg;
+    ctx.font = 'bold 12px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+    ctx.fillText('kv' + g, kvX(g), botY);
+  }
+  ctx.textBaseline = 'alphabetic';
+
+  note.innerHTML = valid
+    ? `Each KV head is shared by a group of <b>${groupSize}</b> query head${groupSize === 1 ? '' : 's'}.`
+    : `<span style="color:var(--warn)">${q} is not divisible by ${kv}</span> — real GQA requires `
+      + `<code>n_heads % n_kv_heads == 0</code>. Showing an approximate split.`;
+
+  updateTable(q, kv);
+}
+
+function updateTable(q, kv) {
+  const tbody = document.querySelector('#memTable tbody');
+  const mha = 2 * q * HEAD_DIM;
+  const rows = [
+    { name: 'MHA',           cls: 'mha', kvh: q  },
+    { name: 'GQA (current)', cls: 'gqa', kvh: kv },
+    { name: 'MQA',           cls: 'mqa', kvh: 1  },
+  ];
+  tbody.innerHTML = rows.map(r => {
+    const f = 2 * r.kvh * HEAD_DIM;
+    const pct = 100 * f / mha;
+    return `<tr>
+      <td class="${r.cls}">${r.name}</td>
+      <td class="num">${r.kvh}</td>
+      <td class="num">${f}</td>
+      <td class="num">${pct.toFixed(0)}%</td>
+      <td style="width:160px"><div class="bar" style="width:${pct}%"></div></td>
+    </tr>`;
+  }).join('');
+
+  const saved = (100 * (1 - kv / q)).toFixed(0);
+  document.getElementById('memNote').innerHTML =
+    `With head_dim = ${HEAD_DIM}, going from ${q} to ${kv} KV heads cuts the per-token KV cache by `
+    + `<b>${saved}%</b>. Multiply by sequence length × layers to see why this dominates long-context memory.`;
+}
+
+qSlider.addEventListener('input', draw);
+kvSlider.addEventListener('input', draw);
+window.addEventListener('resize', draw);
+draw();
+</script>
+</body>
+</html>

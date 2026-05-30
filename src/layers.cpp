@@ -41,3 +41,33 @@ void MLP::forward(const Tensor& IN, Tensor& OUT) const {
     // OUT = GATE @ W_d^T
     down_.forward(GATE, OUT);
 }
+
+AttentionLayer::AttentionLayer(const ModelConfig& config,
+                               LinearLayer        q_proj,
+                               LinearLayer        k_proj,
+                               LinearLayer        v_proj,
+                               LinearLayer        out_proj) :
+    q_proj_(std::move(q_proj)),
+    k_proj_(std::move(k_proj)),
+    v_proj_(std::move(v_proj)),
+    out_proj_(std::move(out_proj)),
+    head_dim_(config.head_dim),
+    n_heads_(config.n_heads),
+    n_kv_heads_(config.n_kv_heads) {}
+
+void AttentionLayer::forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const {
+    const int T = IN.dim(0);
+    Tensor    Q({ T, n_heads_ * head_dim_ });
+    Tensor    K({ T, n_kv_heads_ * head_dim_ });
+    Tensor    V({ T, n_kv_heads_ * head_dim_ });
+
+    q_proj_.forward(IN, Q);
+    k_proj_.forward(IN, K);
+    v_proj_.forward(IN, V);
+
+    ops::RoPE(Q, K, head_dim_, start_pos, rc);
+
+    Tensor ATTN({ T, n_heads_ * head_dim_ });
+    ops::attn(Q, K, V, ATTN, n_heads_, n_kv_heads_, head_dim_);
+    out_proj_.forward(ATTN, OUT);
+}

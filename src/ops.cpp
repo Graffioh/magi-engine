@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -84,6 +85,48 @@ void apply_rope(float*           tensor_data,
                 // t_a' = t_a*cos(theta) - t_b*sin(theta)
                 // t_b' = t_a*sin(theta) + t_b*cos(theta)
                 compute_rope_pair(tensor_data, head_base, p, cos_theta, sin_theta);
+            }
+        }
+    }
+}
+
+// Gather one head's slice out of a row-major tensor into contiguous (rows, head_dim) scratch.
+// We do this by using the width of a row, to jump to the exact row slice that we need.
+void build_head_slice(const float* src, Tensor& dst, int rows, int row_width, int head, int head_dim) {
+    float* d = dst.data_ptr();
+    for (int t = 0; t < rows; ++t) {
+        std::memcpy(d + t * head_dim, src + t * row_width + head * head_dim, head_dim * sizeof(float));
+    }
+}
+
+// Gather one head's slice (transpoed) and transpose it for the correct layout.
+void build_head_slice_transposed(const float* src, Tensor& dst, int rows, int row_width, int head, int head_dim) {
+    float* d = dst.data_ptr();
+    for (int t = 0; t < rows; ++t) {
+        const float* src_row = src + t * row_width + head * head_dim;
+        for (int e = 0; e < head_dim; ++e) {
+            d[e * rows + t] = src_row[e];
+        }
+    }
+}
+
+// Scatter a packed (rows, head_dim) head result back into dst's head-h column block.
+// The mirror of build_head_slice: the dst block is contiguous per row, so memcpy works.
+void scatter_head_slice(const Tensor& src, float* dst, int rows, int row_width, int head, int head_dim) {
+    const float* s = src.data_ptr();
+    for (int t = 0; t < rows; ++t) {
+        std::memcpy(dst + t * row_width + head * head_dim, s + t * head_dim, head_dim * sizeof(float));
+    }
+}
+
+void apply_causal_mask(Tensor& scores) {
+    const int T = scores.dim(0);
+
+    float* score_data = scores.data_ptr();
+    for (int i = 0; i < T; ++i) {
+        for (int j = 0; j < T; ++j) {
+            if (j > i) {
+                score_data[i * T + j] = -1e10f;
             }
         }
     }
@@ -182,30 +225,30 @@ void mul(const Tensor& A, const Tensor& B, Tensor& OUT) {
     }
 }
 
-// m = max_j IN[j]
-// softmax(IN)_i = e^(IN[i] - m) / sum_j e^(IN[j] - m)   (along last dim)
-void softmax(const Tensor& IN, Tensor& OUT) {
+// m = max_j INOUT[j]
+// softmax(INOUT)_i = e^(INOUT[i] - m) / sum_j e^(INOUT[j] - m)   (along last dim)
+// In-place: each row is overwritten with its softmax.
+void softmax(Tensor& INOUT) {
     int num_rows = 1;
-    for (int i = 0; i + 1 < IN.rank(); ++i) {
-        num_rows *= IN.dim(i);
+    for (int i = 0; i + 1 < INOUT.rank(); ++i) {
+        num_rows *= INOUT.dim(i);
     }
 
-    const float* in_data  = IN.data_ptr();
-    float*       out_data = OUT.data_ptr();
-    int          last_dim = IN.dim(-1);
+    float* data     = INOUT.data_ptr();
+    int    last_dim = INOUT.dim(-1);
     for (int r = 0; r < num_rows; ++r) {
-        const float* in_row_dim = in_data + r * last_dim;
-        float        max_val    = *std::max_element(in_row_dim, in_row_dim + last_dim);
+        float* row     = data + r * last_dim;
+        float  max_val = *std::max_element(row, row + last_dim);
 
         float sum_j = 0;
         for (int j = 0; j < last_dim; ++j) {
-            float e                    = expf(in_data[r * last_dim + j] - max_val);
-            out_data[r * last_dim + j] = e;
+            float e = expf(row[j] - max_val);
+            row[j]  = e;
             sum_j += e;
         }
 
         for (int i = 0; i < last_dim; ++i) {
-            out_data[r * last_dim + i] /= sum_j;
+            row[i] /= sum_j;
         }
     }
 }
@@ -229,7 +272,7 @@ void embed(const std::vector<int>& ids, const Tensor& We, Tensor& OUT) {
 //     for each pair of head dimensions, we perform magic with rotations
 //
 // Note: with GQA, we need to take in count that multiple Qs can share the same KV -> (#Q_heads > #KV_heads)
-void RoPE(Tensor& Q, Tensor& K, int head_dim, int start_pos, const RopeCache& rc) {
+void RoPE(Tensor& Q, Tensor& K, const int head_dim, const int start_pos, const RopeCache& rc) {
     assert(head_dim % 2 == 0);
 
     int seq_len    = Q.dim(0);
@@ -238,6 +281,48 @@ void RoPE(Tensor& Q, Tensor& K, int head_dim, int start_pos, const RopeCache& rc
 
     apply_rope(Q.data_ptr(), seq_len, n_heads, head_dim, start_pos, rc);
     apply_rope(K.data_ptr(), seq_len, n_kv_heads, head_dim, start_pos, rc);
+}
+
+void attn(const Tensor& Q,
+          const Tensor& K,
+          const Tensor& V,
+          Tensor&       OUT,
+          const int     n_heads,
+          const int     n_kv_heads,
+          const int     head_dim) {
+    int T = Q.dim(0);
+
+    float        head_dim_sqrt = sqrtf(head_dim);
+    const float* q_data_ptr    = Q.data_ptr();
+    const float* k_data_ptr    = K.data_ptr();
+    const float* v_data_ptr    = V.data_ptr();
+
+    for (int h = 0; h < n_heads; ++h) {
+        const int kv_head = h / (n_heads / n_kv_heads);
+
+        Tensor Q_slice({ T, head_dim });
+        build_head_slice(q_data_ptr, Q_slice, T, n_heads * head_dim, h, head_dim);
+
+        Tensor K_slice({ T, head_dim });
+        build_head_slice(k_data_ptr, K_slice, T, n_kv_heads * head_dim, kv_head, head_dim);
+
+        Tensor scores({ T, T });
+        matmul(Q_slice, K_slice, scores);
+
+        for (int i = 0; i < T * T; ++i) {
+            scores.data_ptr()[i] /= head_dim_sqrt;
+        }
+
+        apply_causal_mask(scores);
+        softmax(scores);
+
+        Tensor V_slice({ head_dim, T });
+        build_head_slice_transposed(v_data_ptr, V_slice, T, n_kv_heads * head_dim, kv_head, head_dim);
+
+        Tensor OUT_slice({ T, head_dim });
+        matmul(scores, V_slice, OUT_slice);
+        scatter_head_slice(OUT_slice, OUT.data_ptr(), T, n_heads * head_dim, h, head_dim);
+    }
 }
 
 }  // namespace ops

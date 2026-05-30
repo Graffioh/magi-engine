@@ -116,27 +116,24 @@ void run_ops_tests(TestState& s) {
 
     // softmax: 1D row, hand-computed
     Tensor IN_sm({ 1, 3 });
-    Tensor OUT_sm({ 1, 3 });
     fill(IN_sm, { 1, 2, 3 });
-    ops::softmax(IN_sm, OUT_sm);
-    check(s, "softmax: (1,3) hand-computed", OUT_sm, std::vector<float>{ 0.090030573f, 0.244728471f, 0.665240956f },
+    ops::softmax(IN_sm);
+    check(s, "softmax: (1,3) hand-computed", IN_sm, std::vector<float>{ 0.090030573f, 0.244728471f, 0.665240956f },
           std::vector<int>{ 1, 3 });
 
     // softmax: numerical stability. shift-by-max means [1000,1001,1002] == [0,1,2]
     Tensor IN_sm_big({ 1, 3 });
-    Tensor OUT_sm_big({ 1, 3 });
     fill(IN_sm_big, { 1000, 1001, 1002 });
-    ops::softmax(IN_sm_big, OUT_sm_big);
-    check(s, "softmax: numerical stability (large inputs)", OUT_sm_big,
+    ops::softmax(IN_sm_big);
+    check(s, "softmax: numerical stability (large inputs)", IN_sm_big,
           std::vector<float>{ 0.090030573f, 0.244728471f, 0.665240956f }, std::vector<int>{ 1, 3 });
 
     // softmax: sum-to-1 invariant on a wider row (no hand-computed values needed)
     Tensor IN_sm_sum({ 1, 5 });
-    Tensor OUT_sm_sum({ 1, 5 });
     fill(IN_sm_sum, { -1, 0, 1, 2, 3 });
-    ops::softmax(IN_sm_sum, OUT_sm_sum);
+    ops::softmax(IN_sm_sum);
     {
-        const float* p     = OUT_sm_sum.data_ptr();
+        const float* p     = IN_sm_sum.data_ptr();
         float        total = 0;
         for (int i = 0; i < 5; ++i) {
             total += p[i];
@@ -148,20 +145,18 @@ void run_ops_tests(TestState& s) {
 
     // softmax: batched, each row independent
     Tensor IN_sm_b({ 2, 3 });
-    Tensor OUT_sm_b({ 2, 3 });
     fill(IN_sm_b, { 1, 2, 3, 3, 1, 2 });
-    ops::softmax(IN_sm_b, OUT_sm_b);
-    check(s, "softmax: batched (2,3)", OUT_sm_b,
+    ops::softmax(IN_sm_b);
+    check(s, "softmax: batched (2,3)", IN_sm_b,
           std::vector<float>{ 0.090030573f, 0.244728471f, 0.665240956f, 0.665240956f, 0.090030573f, 0.244728471f },
           std::vector<int>{ 2, 3 });
 
     // softmax: argmax preserved
     Tensor IN_sm_am({ 1, 4 });
-    Tensor OUT_sm_am({ 1, 4 });
     fill(IN_sm_am, { 0.5f, -1.0f, 2.7f, 1.0f });
-    ops::softmax(IN_sm_am, OUT_sm_am);
+    ops::softmax(IN_sm_am);
     {
-        const float* p      = OUT_sm_am.data_ptr();
+        const float* p      = IN_sm_am.data_ptr();
         int          argmax = 0;
         for (int i = 1; i < 4; ++i) {
             if (p[i] > p[argmax]) {

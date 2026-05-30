@@ -120,4 +120,29 @@ void run_golden_tests(TestState& s) {
         check(s, "golden: rope (Q)", Q, flat(golden_q), { T, N_HEADS * HEAD_DIM }, 1e-4f);
         check(s, "golden: rope (K)", K, flat(golden_k), { T, N_KV_HEADS * HEAD_DIM }, 1e-4f);
     }
+
+    // --- Attention layer vs golden (projections -> RoPE -> GQA causal SDPA -> output proj) ---
+    // Fed the golden embeddings directly (like the MLP golden), so it tests the whole
+    // attention layer end-to-end. Looser 1e-4 tolerance for accumulated fp32 matmul drift.
+    {
+        Tensor x  = load_golden({ T, HIDDEN }, "golden.embed_out");
+        Tensor wq = load_golden({ N_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.q.weight");
+        Tensor wk = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.k.weight");
+        Tensor wv = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.v.weight");
+        Tensor wo = load_golden({ HIDDEN, N_HEADS * HEAD_DIM }, "layer0.attn.o.weight");
+
+        ModelConfig cfg;
+        cfg.n_heads    = N_HEADS;
+        cfg.n_kv_heads = N_KV_HEADS;
+        cfg.head_dim   = HEAD_DIM;
+
+        AttentionLayer attn(cfg, LinearLayer(std::move(wq)), LinearLayer(std::move(wk)),
+                            LinearLayer(std::move(wv)), LinearLayer(std::move(wo)));
+        RopeCache      rc(/*max_seq_len=*/T, HEAD_DIM);
+        Tensor         out({ T, HIDDEN });
+        attn.forward(x, out, /*start_pos=*/0, rc);
+
+        Tensor golden = load_golden({ T, HIDDEN }, "golden.attn_out");
+        check(s, "golden: attention", out, flat(golden), { T, HIDDEN }, 1e-4f);
+    }
 }
