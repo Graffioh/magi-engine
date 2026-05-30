@@ -1,7 +1,5 @@
 #include "ops.h"
 
-#include "utils.h"
-
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -80,8 +78,8 @@ void apply_rope(float*           tensor_data,
         for (int h = 0; h < n_heads; ++h) {
             const int head_base = ((s * n_heads) + h) * head_dim;
             for (int p = 0; p < head_dim / 2; ++p) {
-                const float cos_theta = rc.cos_cache()[pos * head_dim / 2 + p];
-                const float sin_theta = rc.sin_cache()[pos * head_dim / 2 + p];
+                const float cos_theta = rc.cos_cache()[pos * (head_dim / 2) + p];
+                const float sin_theta = rc.sin_cache()[pos * (head_dim / 2) + p];
 
                 // t_a' = t_a*cos(theta) - t_b*sin(theta)
                 // t_b' = t_a*sin(theta) + t_b*cos(theta)

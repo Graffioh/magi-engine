@@ -13,6 +13,7 @@ add_executable(magi_engine
   src/mmap.cpp
   src/ops.cpp
   src/tensor.cpp
+  src/utils.cpp
 )
 
 target_compile_options(magi_engine PRIVATE
@@ -32,6 +33,7 @@ add_executable(magi_tests
   src/mmap.cpp
   src/ops.cpp
   src/tensor.cpp
+  src/utils.cpp
 )
 
 target_include_directories(magi_tests PRIVATE src)

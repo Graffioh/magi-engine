@@ -1,5 +1,7 @@
 #include "utils.h"
 
+#include <cmath>
+
 RopeCache::RopeCache(const int max_seq_len, const int head_dim, const int base) {
     int head_dim_half = head_dim / 2;
 

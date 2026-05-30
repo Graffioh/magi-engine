@@ -191,6 +191,10 @@ void run_ops_tests(TestState& s) {
     constexpr int HEAD_DIM   = 4;
     constexpr int N_HEADS    = 2;
     constexpr int N_KV_HEADS = 1;
+    constexpr int MAX_SEQ    = 16;  // covers the largest position used below (start_pos=5 + a few rows)
+
+    // Precomputed cos/sin table shared by every RoPE call in this block.
+    RopeCache rc(MAX_SEQ, HEAD_DIM);
 
     // RoPE: pos=0 identity. A single token sits at position 0, where theta=0 for
     // every pair (cos=1, sin=0), so the rotation is the identity. seq_len MUST be
@@ -202,7 +206,7 @@ void run_ops_tests(TestState& s) {
         std::vector<float>   k_vals = { 1.5f, -2.5f, 3.5f, -4.5f };
         fill(Q, q_vals);
         fill(K, k_vals);
-        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/0);
+        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/0, rc);
         // theta=0 -> bit-exact identity, but reuse check()'s default tolerance.
         check(s, "rope: pos=0 identity (Q)", Q, q_vals, std::vector<int>{ 1, N_HEADS * HEAD_DIM });
         check(s, "rope: pos=0 identity (K)", K, k_vals, std::vector<int>{ 1, N_KV_HEADS * HEAD_DIM });
@@ -228,7 +232,7 @@ void run_ops_tests(TestState& s) {
         };
         float q_before = sum_sq(Q);
         float k_before = sum_sq(K);
-        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/5);
+        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/5, rc);
 
         Tensor Q_NORM({ 1 });
         Q_NORM.data_ptr()[0] = sum_sq(Q);
@@ -255,7 +259,7 @@ void run_ops_tests(TestState& s) {
             Tensor dummy({ 1, HEAD_DIM });  // throwaway: RoPE rotates both args
             fill(vec, vec_vals);
             fill(dummy, std::vector<float>(HEAD_DIM, 0.0f));
-            ops::RoPE(vec, dummy, HEAD_DIM, /*start_pos=*/pos);
+            ops::RoPE(vec, dummy, HEAD_DIM, /*start_pos=*/pos, rc);
             return std::vector<float>(vec.data_ptr(), vec.data_ptr() + HEAD_DIM);
         };
         auto score = [&](int m, int n) {

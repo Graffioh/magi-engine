@@ -113,7 +113,8 @@ void run_golden_tests(TestState& s) {
     {
         Tensor Q = load_golden_mut({ T, N_HEADS * HEAD_DIM }, "golden.rope_q_in");
         Tensor K = load_golden_mut({ T, N_KV_HEADS * HEAD_DIM }, "golden.rope_k_in");
-        ops::RoPE(Q, K, HEAD_DIM);  // default start_pos=0, base=10000
+        RopeCache rc(/*max_seq_len=*/T, HEAD_DIM);
+        ops::RoPE(Q, K, HEAD_DIM, /*start_pos=*/0, rc);
         Tensor golden_q = load_golden({ T, N_HEADS * HEAD_DIM }, "golden.rope_q_out");
         Tensor golden_k = load_golden({ T, N_KV_HEADS * HEAD_DIM }, "golden.rope_k_out");
         check(s, "golden: rope (Q)", Q, flat(golden_q), { T, N_HEADS * HEAD_DIM }, 1e-4f);
