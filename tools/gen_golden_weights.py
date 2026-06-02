@@ -143,6 +143,35 @@ def attention(x, wq, wk, wv, wo, n_heads, n_kv_heads, head_dim, base=10000, star
     return linear(out, wo)  # (T, hidden)
 
 
+def transformer_block(x, w, prefix, n_heads, n_kv_heads, head_dim, base=10000, start_pos=0):
+    """One pre-norm decoder block. Mirrors TransformerBlock::forward in C++:
+        h   = x + attention(attn_norm(x))
+        out = h + mlp(ffn_norm(h))
+    The norms feed *copies*; the residual stream (x -> h -> out) is what each
+    sublayer adds back into. float32 throughout.
+    """
+    attn_out = attention(
+        rmsnorm(x, w[prefix + "attn_norm.weight"]),
+        w[prefix + "attn.q.weight"],
+        w[prefix + "attn.k.weight"],
+        w[prefix + "attn.v.weight"],
+        w[prefix + "attn.o.weight"],
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        base,
+        start_pos,
+    )
+    h = (x + attn_out).astype(np.float32)
+    mlp_out = mlp(
+        rmsnorm(h, w[prefix + "ffn_norm.weight"]),
+        w[prefix + "mlp.gate.weight"],
+        w[prefix + "mlp.up.weight"],
+        w[prefix + "mlp.down.weight"],
+    )
+    return (h + mlp_out).astype(np.float32)
+
+
 # ----------------------------------------------------------------------------
 # Weight generation. One fixed-seed Generator -> fully reproducible.
 # ----------------------------------------------------------------------------
@@ -222,6 +251,11 @@ def make_goldens(w):
         N_KV_HEADS,
         HEAD_DIM,
     )
+
+    # Full pre-norm transformer block applied directly to the embeddings, layer 0
+    # weights. Composes attn_norm -> attention -> residual -> ffn_norm -> mlp ->
+    # residual end-to-end (the whole TransformerBlock::forward).
+    g["golden.block_out"] = transformer_block(x, w, "layer0.", N_HEADS, N_KV_HEADS, HEAD_DIM)
 
     # TODO (Stage 5): g["golden.logits"].
     return g

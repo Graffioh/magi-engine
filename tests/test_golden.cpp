@@ -145,4 +145,43 @@ void run_golden_tests(TestState& s) {
         Tensor golden = load_golden({ T, HIDDEN }, "golden.attn_out");
         check(s, "golden: attention", out, flat(golden), { T, HIDDEN }, 1e-4f);
     }
+
+    // --- Transformer block vs golden (attn_norm -> attn -> residual -> ffn_norm -> mlp -> residual) ---
+    // Fed the golden embeddings directly. Composes the whole block; a wrong residual,
+    // swapped norm, or mis-seeded stream shows up here before it compounds across layers.
+    {
+        Tensor x = load_golden({ T, HIDDEN }, "golden.embed_out");
+
+        Tensor wq = load_golden({ N_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.q.weight");
+        Tensor wk = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.k.weight");
+        Tensor wv = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, "layer0.attn.v.weight");
+        Tensor wo = load_golden({ HIDDEN, N_HEADS * HEAD_DIM }, "layer0.attn.o.weight");
+
+        Tensor wg = load_golden({ INTERMEDIATE, HIDDEN }, "layer0.mlp.gate.weight");
+        Tensor wu = load_golden({ INTERMEDIATE, HIDDEN }, "layer0.mlp.up.weight");
+        Tensor wd = load_golden({ HIDDEN, INTERMEDIATE }, "layer0.mlp.down.weight");
+
+        Tensor an = load_golden({ HIDDEN }, "layer0.attn_norm.weight");
+        Tensor fn = load_golden({ HIDDEN }, "layer0.ffn_norm.weight");
+
+        ModelConfig cfg;
+        cfg.n_heads    = N_HEADS;
+        cfg.n_kv_heads = N_KV_HEADS;
+        cfg.head_dim   = HEAD_DIM;
+
+        AttentionLayer attn(cfg, LinearLayer(std::move(wq)), LinearLayer(std::move(wk)),
+                            LinearLayer(std::move(wv)), LinearLayer(std::move(wo)));
+        MLP            mlp(LinearLayer(std::move(wg)), LinearLayer(std::move(wu)), LinearLayer(std::move(wd)));
+        RMSNormLayer   attn_norm(std::move(an), 1e-5f);  // eps matches RMS_EPS in gen_golden_weights.py
+        RMSNormLayer   ffn_norm(std::move(fn), 1e-5f);
+
+        TransformerBlock block(std::move(attn), std::move(mlp), std::move(attn_norm), std::move(ffn_norm));
+
+        RopeCache rc(/*max_seq_len=*/T, HEAD_DIM);
+        Tensor    out({ T, HIDDEN });
+        block.forward(x, out, /*start_pos=*/0, rc);
+
+        Tensor golden = load_golden({ T, HIDDEN }, "golden.block_out");
+        check(s, "golden: transformer block", out, flat(golden), { T, HIDDEN }, 1e-4f);
+    }
 }
