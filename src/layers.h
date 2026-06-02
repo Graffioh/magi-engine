@@ -23,6 +23,15 @@ class EmbeddingLayer {
     void forward(const std::vector<int>& token_ids, Tensor& OUT) const;
 };
 
+class RMSNormLayer {
+  private:
+    Tensor W_;     // (hidden_size,) per-channel scale
+    float  eps_;
+  public:
+    RMSNormLayer(Tensor W, float eps);
+    void forward(const Tensor& IN, Tensor& OUT) const;
+};
+
 // SwiGLU MLP
 class MLP {
   private:
@@ -45,5 +54,17 @@ class AttentionLayer {
                    LinearLayer        k_proj,
                    LinearLayer        v_proj,
                    LinearLayer        out_proj);
+    void forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const;
+};
+
+class TransformerBlock {
+  private:
+    AttentionLayer attn_;
+    MLP            mlp_;
+    RMSNormLayer   attn_norm_;  // applied before attention
+    RMSNormLayer   ffn_norm_;   // applied before the MLP
+
+  public:
+    TransformerBlock(AttentionLayer attn, MLP mlp, RMSNormLayer attn_norm, RMSNormLayer ffn_norm);
     void forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const;
 };

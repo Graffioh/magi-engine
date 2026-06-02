@@ -256,6 +256,7 @@ void RoPE(Tensor& Q, Tensor& K, const int head_dim, const int start_pos, const R
     apply_rope(K.data_ptr(), seq_len, n_kv_heads, head_dim, start_pos, rc);
 }
 
+// TODO: add start_pos for inference
 void attn(const Tensor& Q,
           const Tensor& K,
           const Tensor& V,
@@ -280,8 +281,8 @@ void attn(const Tensor& Q,
         const int kv_head = (h / group_size);
 
         // QK^T: (T, head_dim) x (head_dim, T) -> (T, T)
-        // we need to scatter the big tensor containing heads into single head
-        // NOTE: first scratch buffer, then fast kernel with indexing.
+        // we need to gather the heads into big tensor into single head tensor
+        // TODO: first scratch buffer, then fast kernel with indexing.
         Tensor Q_head({ T, head_dim });
         Tensor K_head({ T, head_dim });
         for (int t = 0; t < T; ++t) {
@@ -312,7 +313,7 @@ void attn(const Tensor& Q,
             }
         }
 
-        // we need to gather the small tensor head into the big OUT tensor containing all the heads
+        // we need to scatter the head of the small tensor into the big OUT tensor containing all the heads
         Tensor OUT_head({ T, head_dim });
         matmul(ATTN_score, V_head, OUT_head);
         for (int t = 0; t < T; ++t) {

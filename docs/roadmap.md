@@ -115,14 +115,14 @@ Scope: the hardest layer in the stack, built against the Stage 3 scaffolding.
 
 - [x] RoPE op: precomputed `inv_freq`, rotates pairs of dims on Q and K per
       head. Standalone, tested against golden.
-- [ ] Q / K / V projections (three `LinearLayer`s; fused into one matmul
+- [x] Q / K / V projections (three `LinearLayer`s; fused into one matmul
       later if useful).
-- [ ] Scaled dot-product attention with causal mask, softmax over the last
+- [x] Scaled dot-product attention with causal mask, softmax over the last
       dim, attention-weighted V.
-- [ ] Grouped-query attention from day one (`n_heads=2`, `n_kv_heads=1` in
+- [x] Grouped-query attention from day one (`n_heads=2`, `n_kv_heads=1` in
       the toy): K and V repeated across query groups.
-- [ ] Output projection.
-- [ ] Tested layer-0 attention output matches golden within tolerance.
+- [x] Output projection.
+- [x] Tested layer-0 attention output matches golden within tolerance.
 
 Exit criteria: a single attention layer applied to the toy model's input
 matches the Python reference within `1e-4`.

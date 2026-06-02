@@ -16,6 +16,12 @@ void EmbeddingLayer::forward(const std::vector<int>& token_ids, Tensor& OUT) con
     ops::embed(token_ids, We_, OUT);
 }
 
+RMSNormLayer::RMSNormLayer(Tensor W, float eps) : W_(std::move(W)), eps_(eps) {}
+
+void RMSNormLayer::forward(const Tensor& IN, Tensor& OUT) const {
+    ops::RMSNorm(IN, W_, OUT, eps_);
+}
+
 MLP::MLP(LinearLayer gate, LinearLayer up, LinearLayer down) :
     gate_(std::move(gate)),
     up_(std::move(up)),
@@ -71,3 +77,11 @@ void AttentionLayer::forward(const Tensor& IN, Tensor& OUT, const int start_pos,
     ops::attn(Q, K, V, ATTN, n_heads_, n_kv_heads_, head_dim_);
     out_proj_.forward(ATTN, OUT);
 }
+
+TransformerBlock::TransformerBlock(AttentionLayer attn, MLP mlp, RMSNormLayer attn_norm, RMSNormLayer ffn_norm) :
+    attn_(std::move(attn)),
+    mlp_(std::move(mlp)),
+    attn_norm_(std::move(attn_norm)),
+    ffn_norm_(std::move(ffn_norm)) {}
+
+void TransformerBlock::forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const {}
