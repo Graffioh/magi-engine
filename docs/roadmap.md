@@ -132,7 +132,7 @@ matches the Python reference within `1e-4`.
 Scope: compose everything into a model that produces logits, still on the
 toy weights.
 
-- [ ] Pre-norm transformer block: `x + attn(rmsnorm(x))`, `x + mlp(rmsnorm(x))`.
+- [x] Pre-norm transformer block: `x + attn(rmsnorm(x))`, `x + mlp(rmsnorm(x))`.
 - [ ] `Model::forward(tokens) -> logits`: embedding → N blocks → final
       RMSNorm → LM head projection to vocab.
 - [ ] Greedy argmax sampling.

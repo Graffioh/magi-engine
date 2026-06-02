@@ -84,4 +84,24 @@ TransformerBlock::TransformerBlock(AttentionLayer attn, MLP mlp, RMSNormLayer at
     attn_norm_(std::move(attn_norm)),
     ffn_norm_(std::move(ffn_norm)) {}
 
-void TransformerBlock::forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const {}
+void TransformerBlock::forward(const Tensor& IN, Tensor& OUT, const int start_pos, const RopeCache& rc) const {
+    // TODO(perf): hoist the two (seq_len, hidden_dim) scratch buffers + the stream into a
+    // preallocated RunState sized to max context, shared across all layers and tokens,
+    // so the decode loop never allocates.
+
+    // OUT is the residual stream
+    OUT.copy_from(IN);
+
+    Tensor NORMED({ OUT.dim(0), OUT.dim(1) });
+    attn_norm_.forward(OUT, NORMED);
+
+    Tensor ATTN_OUT({ OUT.dim(0), OUT.dim(1) });
+    attn_.forward(NORMED, ATTN_OUT, start_pos, rc);
+    OUT.add(ATTN_OUT);
+
+    ffn_norm_.forward(OUT, NORMED);
+
+    Tensor MLP_OUT({ OUT.dim(0), OUT.dim(1) });
+    mlp_.forward(NORMED, MLP_OUT);
+    OUT.add(MLP_OUT);
+}

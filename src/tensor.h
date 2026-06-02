@@ -44,4 +44,7 @@ class Tensor {
     }
 
     const std::vector<int>& strides() const { return strides_; }
+
+    void add(const Tensor& OTHER);
+    void copy_from(const Tensor& OTHER);
 };

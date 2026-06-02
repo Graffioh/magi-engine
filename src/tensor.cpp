@@ -32,3 +32,19 @@ Tensor::Tensor(std::vector<int> shape, const float* data, std::shared_ptr<void> 
     owner_(std::move(owner)) {
     compute_strides();
 }
+
+void Tensor::add(const Tensor& OTHER) {
+    assert(num_elements() == OTHER.num_elements());
+
+    for (int i = 0; i < num_elements(); ++i) {
+        data_[i] += OTHER.data_ptr()[i];
+    }
+}
+
+void Tensor::copy_from(const Tensor& OTHER) {
+    assert(num_elements() == OTHER.num_elements());
+
+    for (int i = 0; i < num_elements(); ++i) {
+        data_[i] = OTHER.data_ptr()[i];
+    }
+}
