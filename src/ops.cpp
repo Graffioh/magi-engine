@@ -4,6 +4,9 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <limits>
+
+float NEG_INF_F = -std::numeric_limits<float>::infinity();
 
 namespace {
 
@@ -90,43 +93,13 @@ void apply_rope(float*           tensor_data,
     }
 }
 
-// Gather one head's slice out of a row-major tensor into contiguous (rows, head_dim) scratch.
-// We do this by using the width of a row, to jump to the exact row slice that we need.
-void build_head_slice(const float* src, Tensor& dst, int rows, int row_width, int head, int head_dim) {
-    float* d = dst.data_ptr();
-    for (int t = 0; t < rows; ++t) {
-        std::memcpy(d + t * head_dim, src + t * row_width + head * head_dim, head_dim * sizeof(float));
-    }
-}
-
-// Gather one head's slice (transpoed) and transpose it for the correct layout.
-void build_head_slice_transposed(const float* src, Tensor& dst, int rows, int row_width, int head, int head_dim) {
-    float* d = dst.data_ptr();
-    for (int t = 0; t < rows; ++t) {
-        const float* src_row = src + t * row_width + head * head_dim;
-        for (int e = 0; e < head_dim; ++e) {
-            d[e * rows + t] = src_row[e];
-        }
-    }
-}
-
-// Scatter a packed (rows, head_dim) head result back into dst's head-h column block.
-// The mirror of build_head_slice: the dst block is contiguous per row, so memcpy works.
-void scatter_head_slice(const Tensor& src, float* dst, int rows, int row_width, int head, int head_dim) {
-    const float* s = src.data_ptr();
-    for (int t = 0; t < rows; ++t) {
-        std::memcpy(dst + t * row_width + head * head_dim, s + t * head_dim, head_dim * sizeof(float));
-    }
-}
-
-void apply_causal_mask(Tensor& scores) {
-    const int T = scores.dim(0);
-
-    float* score_data = scores.data_ptr();
-    for (int i = 0; i < T; ++i) {
-        for (int j = 0; j < T; ++j) {
+void apply_causal_mask(Tensor& INOUT) {
+    const int M = INOUT.dim(0);
+    const int N = INOUT.dim(1);
+    for (int i = 0; i < M; ++i) {
+        for (int j = i; j < N; ++j) {
             if (j > i) {
-                score_data[i * T + j] = -1e10f;
+                INOUT.data_ptr()[i * M + j] = NEG_INF_F;
             }
         }
     }
@@ -297,31 +270,56 @@ void attn(const Tensor& Q,
     const float* k_data_ptr    = K.data_ptr();
     const float* v_data_ptr    = V.data_ptr();
 
+    // GQA: Q heads = n_heads, KV heads = n_kv_heads, n_heads > n_kv_heads
+    //    for each Q head, we must pick the corresponding KV head
+    //
+    const int group_size = (n_heads / n_kv_heads);
+    const int q_width    = n_heads * head_dim;
+    const int kv_width   = n_kv_heads * head_dim;
     for (int h = 0; h < n_heads; ++h) {
-        const int kv_head = h / (n_heads / n_kv_heads);
+        const int kv_head = (h / group_size);
 
-        Tensor Q_slice({ T, head_dim });
-        build_head_slice(q_data_ptr, Q_slice, T, n_heads * head_dim, h, head_dim);
-
-        Tensor K_slice({ T, head_dim });
-        build_head_slice(k_data_ptr, K_slice, T, n_kv_heads * head_dim, kv_head, head_dim);
-
-        Tensor scores({ T, T });
-        matmul(Q_slice, K_slice, scores);
-
-        for (int i = 0; i < T * T; ++i) {
-            scores.data_ptr()[i] /= head_dim_sqrt;
+        // QK^T: (T, head_dim) x (head_dim, T) -> (T, T)
+        // we need to scatter the big tensor containing heads into single head
+        // NOTE: first scratch buffer, then fast kernel with indexing.
+        Tensor Q_head({ T, head_dim });
+        Tensor K_head({ T, head_dim });
+        for (int t = 0; t < T; ++t) {
+            for (int d = 0; d < head_dim; ++d) {
+                Q_head.data_ptr()[t * head_dim + d] = q_data_ptr[t * q_width + h * head_dim + d];
+                K_head.data_ptr()[t * head_dim + d] = k_data_ptr[t * kv_width + kv_head * head_dim + d];
+            }
         }
 
-        apply_causal_mask(scores);
-        softmax(scores);
+        // attn_score: matmul -> divide by sqrt(h_d) -> causal mask -> softmax
+        Tensor ATTN_score({ T, T });
 
-        Tensor V_slice({ head_dim, T });
-        build_head_slice_transposed(v_data_ptr, V_slice, T, n_kv_heads * head_dim, kv_head, head_dim);
+        matmul(Q_head, K_head, ATTN_score);
 
-        Tensor OUT_slice({ T, head_dim });
-        matmul(scores, V_slice, OUT_slice);
-        scatter_head_slice(OUT_slice, OUT.data_ptr(), T, n_heads * head_dim, h, head_dim);
+        for (int t = 0; t < T * T; ++t) {
+            ATTN_score.data_ptr()[t] /= head_dim_sqrt;
+        }
+
+        apply_causal_mask(ATTN_score);
+
+        softmax(ATTN_score);
+
+        // attn (OUT) = attn_score * V: (T, T) x (T, head_dim) -> (T, head_dim)
+        Tensor V_head({ head_dim, T });
+        for (int t = 0; t < T; ++t) {
+            for (int d = 0; d < head_dim; ++d) {
+                V_head.data_ptr()[d * T + t] = v_data_ptr[t * kv_width + kv_head * head_dim + d];
+            }
+        }
+
+        // we need to gather the small tensor head into the big OUT tensor containing all the heads
+        Tensor OUT_head({ T, head_dim });
+        matmul(ATTN_score, V_head, OUT_head);
+        for (int t = 0; t < T; ++t) {
+            for (int d = 0; d < head_dim; ++d) {
+                OUT.data_ptr()[t * q_width + h * head_dim + d] = OUT_head.data_ptr()[t * head_dim + d];
+            }
+        }
     }
 }
 
