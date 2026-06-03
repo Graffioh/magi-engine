@@ -133,7 +133,7 @@ Scope: compose everything into a model that produces logits, still on the
 toy weights.
 
 - [x] Pre-norm transformer block: `x + attn(rmsnorm(x))`, `x + mlp(rmsnorm(x))`.
-- [ ] `Model::forward(tokens) -> logits`: embedding → N blocks → final
+- [x] `Model::forward(tokens) -> logits`: embedding → N blocks → final
       RMSNorm → LM head projection to vocab.
 - [ ] Greedy argmax sampling.
 - [ ] Generation loop: feed prompt tokens, sample next, append, repeat.

@@ -11,6 +11,7 @@ add_executable(magi_engine
   src/main.cpp
   src/layers.cpp
   src/mmap.cpp
+  src/model.cpp
   src/ops.cpp
   src/tensor.cpp
   src/utils.cpp
@@ -31,6 +32,7 @@ add_executable(magi_tests
   tests/test_golden.cpp
   src/layers.cpp
   src/mmap.cpp
+  src/model.cpp
   src/ops.cpp
   src/tensor.cpp
   src/utils.cpp

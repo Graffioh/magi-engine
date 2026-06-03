@@ -257,7 +257,14 @@ def make_goldens(w):
     # residual end-to-end (the whole TransformerBlock::forward).
     g["golden.block_out"] = transformer_block(x, w, "layer0.", N_HEADS, N_KV_HEADS, HEAD_DIM)
 
-    # TODO (Stage 5): g["golden.logits"].
+    # Full model forward -> logits. Mirrors Model::forward in src/model.cpp:
+    #   embed -> N_LAYERS pre-norm blocks (residual stream) -> final_norm -> lm_head.
+    # This is the end-to-end golden: a bug anywhere in the stack shows up here.
+    h = x  # the residual stream, seeded by the embeddings
+    for i in range(N_LAYERS):
+        h = transformer_block(h, w, f"layer{i}.", N_HEADS, N_KV_HEADS, HEAD_DIM)
+    h = rmsnorm(h, w["final_norm.weight"])
+    g["golden.logits"] = linear(h, w["lm_head.weight"])  # (T, VOCAB)
     return g
 
 
