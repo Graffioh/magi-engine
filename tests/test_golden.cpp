@@ -66,6 +66,62 @@ constexpr int HEAD_DIM     = 4;
 constexpr int N_HEADS      = 2;
 constexpr int N_KV_HEADS   = 1;
 
+// Build the toy Model from the golden weight blobs. The RoPE cache is sized to
+// MAX_SEQ so the same model serves both the single forward (T positions) and the
+// generation loop (T + new tokens). Both layers share one ModelConfig.
+Model build_toy_model() {
+    constexpr int N_LAYERS = 2;   // must match gen_golden_weights.py
+    constexpr int MAX_SEQ  = 16;  // RoPE cache capacity; must be >= T + MAX_NEW_TOKENS
+
+    ModelConfig cfg;
+    cfg.vocab_size        = VOCAB;
+    cfg.hidden_size       = HIDDEN;
+    cfg.intermediate_size = INTERMEDIATE;
+    cfg.n_layers          = N_LAYERS;
+    cfg.n_heads           = N_HEADS;
+    cfg.n_kv_heads        = N_KV_HEADS;
+    cfg.head_dim          = HEAD_DIM;
+    cfg.max_seq_len       = MAX_SEQ;
+    cfg.rms_eps           = 1e-5f;  // matches RMS_EPS in gen_golden_weights.py
+
+    // Build one pre-norm transformer block from layer `i`'s weight blobs.
+    auto make_block = [&](int i) {
+        const std::string p = "layer" + std::to_string(i) + ".";
+        Tensor wq = load_golden({ N_HEADS * HEAD_DIM, HIDDEN }, p + "attn.q.weight");
+        Tensor wk = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, p + "attn.k.weight");
+        Tensor wv = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, p + "attn.v.weight");
+        Tensor wo = load_golden({ HIDDEN, N_HEADS * HEAD_DIM }, p + "attn.o.weight");
+        Tensor wg = load_golden({ INTERMEDIATE, HIDDEN }, p + "mlp.gate.weight");
+        Tensor wu = load_golden({ INTERMEDIATE, HIDDEN }, p + "mlp.up.weight");
+        Tensor wd = load_golden({ HIDDEN, INTERMEDIATE }, p + "mlp.down.weight");
+        Tensor an = load_golden({ HIDDEN }, p + "attn_norm.weight");
+        Tensor fn = load_golden({ HIDDEN }, p + "ffn_norm.weight");
+
+        AttentionLayer attn(cfg, LinearLayer(std::move(wq)), LinearLayer(std::move(wk)),
+                            LinearLayer(std::move(wv)), LinearLayer(std::move(wo)));
+        MLP            mlp(LinearLayer(std::move(wg)), LinearLayer(std::move(wu)),
+                           LinearLayer(std::move(wd)));
+        RMSNormLayer   attn_norm(std::move(an), cfg.rms_eps);
+        RMSNormLayer   ffn_norm(std::move(fn), cfg.rms_eps);
+        return TransformerBlock(std::move(attn), std::move(mlp), std::move(attn_norm),
+                                std::move(ffn_norm));
+    };
+
+    std::vector<TransformerBlock> blocks;
+    blocks.reserve(N_LAYERS);
+    for (int i = 0; i < N_LAYERS; ++i) {
+        blocks.push_back(make_block(i));
+    }
+
+    EmbeddingLayer embed(load_golden({ VOCAB, HIDDEN }, "embed.weight"));
+    RMSNormLayer   final_norm(load_golden({ HIDDEN }, "final_norm.weight"), cfg.rms_eps);
+    LinearLayer    lm_head(load_golden({ VOCAB, HIDDEN }, "lm_head.weight"));
+    RopeCache      rc(cfg.max_seq_len, HEAD_DIM);
+
+    return Model(std::move(embed), std::move(blocks), std::move(final_norm),
+                 std::move(lm_head), std::move(rc), cfg);
+}
+
 }  // namespace
 
 void run_golden_tests(TestState& s) {
@@ -192,60 +248,33 @@ void run_golden_tests(TestState& s) {
     // wiring and the final_norm/lm_head tail) surfaces here. Loosest tolerance since
     // fp32 matmul/softmax drift accumulates across both layers.
     {
-        constexpr int N_LAYERS = 2;  // must match gen_golden_weights.py
-
-        ModelConfig cfg;
-        cfg.vocab_size        = VOCAB;
-        cfg.hidden_size       = HIDDEN;
-        cfg.intermediate_size = INTERMEDIATE;
-        cfg.n_layers          = N_LAYERS;
-        cfg.n_heads           = N_HEADS;
-        cfg.n_kv_heads        = N_KV_HEADS;
-        cfg.head_dim          = HEAD_DIM;
-        cfg.max_seq_len       = T;
-        cfg.rms_eps           = 1e-5f;  // matches RMS_EPS in gen_golden_weights.py
-
-        // Build one pre-norm transformer block from layer `i`'s weight blobs.
-        auto make_block = [&](int i) {
-            const std::string p = "layer" + std::to_string(i) + ".";
-            Tensor wq = load_golden({ N_HEADS * HEAD_DIM, HIDDEN }, p + "attn.q.weight");
-            Tensor wk = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, p + "attn.k.weight");
-            Tensor wv = load_golden({ N_KV_HEADS * HEAD_DIM, HIDDEN }, p + "attn.v.weight");
-            Tensor wo = load_golden({ HIDDEN, N_HEADS * HEAD_DIM }, p + "attn.o.weight");
-            Tensor wg = load_golden({ INTERMEDIATE, HIDDEN }, p + "mlp.gate.weight");
-            Tensor wu = load_golden({ INTERMEDIATE, HIDDEN }, p + "mlp.up.weight");
-            Tensor wd = load_golden({ HIDDEN, INTERMEDIATE }, p + "mlp.down.weight");
-            Tensor an = load_golden({ HIDDEN }, p + "attn_norm.weight");
-            Tensor fn = load_golden({ HIDDEN }, p + "ffn_norm.weight");
-
-            AttentionLayer attn(cfg, LinearLayer(std::move(wq)), LinearLayer(std::move(wk)),
-                                LinearLayer(std::move(wv)), LinearLayer(std::move(wo)));
-            MLP            mlp(LinearLayer(std::move(wg)), LinearLayer(std::move(wu)),
-                               LinearLayer(std::move(wd)));
-            RMSNormLayer   attn_norm(std::move(an), cfg.rms_eps);
-            RMSNormLayer   ffn_norm(std::move(fn), cfg.rms_eps);
-            return TransformerBlock(std::move(attn), std::move(mlp), std::move(attn_norm),
-                                    std::move(ffn_norm));
-        };
-
-        std::vector<TransformerBlock> blocks;
-        blocks.reserve(N_LAYERS);
-        for (int i = 0; i < N_LAYERS; ++i) {
-            blocks.push_back(make_block(i));
-        }
-
-        EmbeddingLayer embed(load_golden({ VOCAB, HIDDEN }, "embed.weight"));
-        RMSNormLayer   final_norm(load_golden({ HIDDEN }, "final_norm.weight"), cfg.rms_eps);
-        LinearLayer    lm_head(load_golden({ VOCAB, HIDDEN }, "lm_head.weight"));
-        RopeCache      rc(/*max_seq_len=*/T, HEAD_DIM);
-
-        Model model(std::move(embed), std::move(blocks), std::move(final_norm),
-                    std::move(lm_head), std::move(rc), cfg);
+        Model model = build_toy_model();
 
         Tensor logits({ T, VOCAB });
         model.forward(ids, logits);
 
         Tensor golden = load_golden({ T, VOCAB }, "golden.logits");
         check(s, "golden: full model logits", logits, flat(golden), { T, VOCAB }, 1e-4f);
+    }
+
+    // --- Greedy generation vs golden (Model::generate) ---
+    // Deterministic greedy decode, so the produced id sequence must match the NumPy
+    // reference EXACTLY (integer compare, no tolerance). A single divergent argmax --
+    // e.g. a near-tie flipped by fp drift -- would cascade through the feedback loop,
+    // so this is a strong end-to-end check of forward + argmax + the loop itself.
+    {
+        constexpr int MAX_NEW_TOKENS = 8;  // must match gen_golden_weights.py
+
+        Model            model   = build_toy_model();
+        std::vector<int> out_ids = model.generate(ids, MAX_NEW_TOKENS);
+
+        // golden.gen_ids is the full sequence (prompt + generated), stored as float32.
+        // Ids are small ints, exact in f32, so a direct cast back recovers them.
+        Tensor           gen = load_golden({ T + MAX_NEW_TOKENS }, "golden.gen_ids");
+        std::vector<int> expected_ids;
+        for (int i = 0; i < gen.num_elements(); ++i) {
+            expected_ids.push_back(static_cast<int>(gen.data_ptr()[i]));
+        }
+        check(s, "golden: greedy generation", out_ids, expected_ids);
     }
 }

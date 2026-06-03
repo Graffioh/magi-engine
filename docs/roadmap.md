@@ -135,8 +135,8 @@ toy weights.
 - [x] Pre-norm transformer block: `x + attn(rmsnorm(x))`, `x + mlp(rmsnorm(x))`.
 - [x] `Model::forward(tokens) -> logits`: embedding → N blocks → final
       RMSNorm → LM head projection to vocab.
-- [ ] Greedy argmax sampling.
-- [ ] Generation loop: feed prompt tokens, sample next, append, repeat.
+- [x] Greedy argmax sampling.
+- [x] Generation loop: feed prompt tokens, sample next, append, repeat.
 
 Exit criteria: full forward + greedy generation runs on the toy weights and
 matches the Python reference logits at every layer boundary. Output text is

@@ -40,6 +40,9 @@ SEED = 1234
 # Fixed input token ids for the golden forward pass (T=3). The C++ test uses
 # these exact ids. All are < VOCAB.
 INPUT_IDS = [5, 0, 11]
+# Greedy-generation golden: how many tokens to decode past the prompt. The C++
+# RoPE cache must cover len(INPUT_IDS) + MAX_NEW_TOKENS positions.
+MAX_NEW_TOKENS = 8
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "tests" / "golden"
 
@@ -172,6 +175,29 @@ def transformer_block(x, w, prefix, n_heads, n_kv_heads, head_dim, base=10000, s
     return (h + mlp_out).astype(np.float32)
 
 
+def full_forward(ids, w):
+    """Whole-model forward -> logits. Mirrors Model::forward in src/model.cpp:
+    embed -> N_LAYERS pre-norm blocks (residual stream) -> final_norm -> lm_head.
+    """
+    h = embed(ids, w["embed.weight"])  # (len(ids), HIDDEN)
+    for i in range(N_LAYERS):
+        h = transformer_block(h, w, f"layer{i}.", N_HEADS, N_KV_HEADS, HEAD_DIM)
+    h = rmsnorm(h, w["final_norm.weight"])
+    return linear(h, w["lm_head.weight"])  # (len(ids), VOCAB)
+
+
+def greedy_generate(ids, w, max_new_tokens):
+    """Greedy decode, mirroring Model::generate: forward, argmax the last logits
+    row, append, repeat. Deterministic. Returns the FULL sequence (prompt +
+    generated), matching what the C++ generate() returns.
+    """
+    ids = list(ids)
+    for _ in range(max_new_tokens):
+        logits = full_forward(ids, w)           # (len(ids), VOCAB)
+        ids.append(int(np.argmax(logits[-1])))  # next token = argmax of the last row
+    return ids
+
+
 # ----------------------------------------------------------------------------
 # Weight generation. One fixed-seed Generator -> fully reproducible.
 # ----------------------------------------------------------------------------
@@ -257,14 +283,15 @@ def make_goldens(w):
     # residual end-to-end (the whole TransformerBlock::forward).
     g["golden.block_out"] = transformer_block(x, w, "layer0.", N_HEADS, N_KV_HEADS, HEAD_DIM)
 
-    # Full model forward -> logits. Mirrors Model::forward in src/model.cpp:
-    #   embed -> N_LAYERS pre-norm blocks (residual stream) -> final_norm -> lm_head.
-    # This is the end-to-end golden: a bug anywhere in the stack shows up here.
-    h = x  # the residual stream, seeded by the embeddings
-    for i in range(N_LAYERS):
-        h = transformer_block(h, w, f"layer{i}.", N_HEADS, N_KV_HEADS, HEAD_DIM)
-    h = rmsnorm(h, w["final_norm.weight"])
-    g["golden.logits"] = linear(h, w["lm_head.weight"])  # (T, VOCAB)
+    # Full model forward -> logits (end-to-end: a bug anywhere shows up here).
+    g["golden.logits"] = full_forward(INPUT_IDS, w)  # (T, VOCAB)
+
+    # Greedy generation -> the full id sequence (prompt + generated tokens).
+    # Deterministic, so the C++ Model::generate must reproduce these ids exactly.
+    # Stored as float32 (ids are small ints, exact in f32) like every other blob.
+    g["golden.gen_ids"] = np.asarray(
+        greedy_generate(INPUT_IDS, w, MAX_NEW_TOKENS), dtype=np.float32
+    )
     return g
 
 

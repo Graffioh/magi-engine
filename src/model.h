@@ -17,5 +17,6 @@ class Model {
           LinearLayer                   lm_head,
           RopeCache                     rc,
           ModelConfig                   config);
-    void forward(const std::vector<int>& ids, Tensor& logits) const;
+    void             forward(const std::vector<int>& ids, Tensor& logits) const;
+    std::vector<int> generate(std::vector<int> ids, int max_new_tokens) const;
 };

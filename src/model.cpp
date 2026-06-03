@@ -1,5 +1,7 @@
 #include "model.h"
 
+#include "ops.h"
+
 #include <utility>  // std::swap
 
 Model::Model(EmbeddingLayer                embed,
@@ -29,4 +31,19 @@ void Model::forward(const std::vector<int>& ids, Tensor& logits) const {
 
     final_norm_.forward(x, tmp);
     lm_head_.forward(tmp, logits);
+}
+
+std::vector<int> Model::generate(std::vector<int> ids, int max_new_tokens) const {
+    const int vocab = config_.vocab_size;
+
+    for (int step = 0; step < max_new_tokens; ++step) {
+        Tensor logits({ static_cast<int>(ids.size()), vocab });
+        forward(ids, logits);
+
+        int next = ops::argmax(logits);
+
+        ids.push_back(next);
+    }
+
+    return ids;
 }
