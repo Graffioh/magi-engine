@@ -324,4 +324,18 @@ void attn(const Tensor& Q,
     }
 }
 
+int argmax(const Tensor& logits) {
+    const int    vocab = logits.dim(-1);
+    const float* row   = logits.data_ptr() + (logits.dim(0) - 1) * logits.dim(-1);
+
+    int max_arg = 0;
+    for (int j = 1; j < vocab; ++j) {
+        if (row[j] > row[max_arg]) {
+            max_arg = j;
+        }
+    }
+
+    return max_arg;
+}
+
 }  // namespace ops

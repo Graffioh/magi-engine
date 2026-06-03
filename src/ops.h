@@ -19,4 +19,5 @@ void attn(const Tensor& Q,
           const int     n_heads,
           const int     n_kv_heads,
           const int     head_dim);
+int  argmax(const Tensor& logits);
 }  // namespace ops
