@@ -151,27 +151,27 @@ model.
 
 GGUF loader (F32 tensors only to start):
 
-- [ ] Header parse: magic `"GGUF"`, `version`, `tensor_count`,
+- [x] Header parse: magic `"GGUF"`, `version`, `tensor_count`,
       `metadata_kv_count` (all little-endian).
-- [ ] Metadata KV parser: typed values incl. arrays (`read_metadata_value`
+- [x] Metadata KV parser: typed values incl. arrays (`read_metadata_value`
       dispatch on the type enum). Extract hyperparameters — `block_count`,
       head counts, `embedding_length`, RoPE `freq_base`, RMSNorm eps.
-- [ ] Tensor directory parse: name, dims, `ggml_type` (assert F32 == 0),
+- [x] Tensor directory parse: name, dims, `ggml_type` (assert F32 == 0),
       `offset`. Reverse ggml dim order (`ne[0]` is the inner/fast dim).
-- [ ] Build `Tensor` mmap views: data section start padded to
+- [x] Build `Tensor` mmap views: data section start padded to
       `general.alignment` (default 32); each view at `base + data_start +
       offset`, sharing the `MappedFile` via `owner_`. Returns
       `std::unordered_map<std::string, Tensor>`.
-- [ ] Round-trip test: a tiny F32 GGUF written by Python `gguf`, loaded in
+- [x] Round-trip test: a tiny F32 GGUF written by Python `gguf`, loaded in
       C++, values match the NumPy source.
 
 Real weights:
 
-- [ ] Obtain an F32 TinyLlama GGUF (convert from HF with llama.cpp's
+- [x] Obtain an F32 TinyLlama GGUF (convert from HF with llama.cpp's
       `convert_hf_to_gguf.py --outtype f32`, or download one).
-- [ ] Name mapping: ggml names (`blk.{i}.attn_q.weight`, `token_embd.weight`,
+- [x] Name mapping: ggml names (`blk.{i}.attn_q.weight`, `token_embd.weight`,
       `output_norm.weight`, …) → engine layers.
-- [ ] Sanity checks: norms of a few known weight matrices match a Python
+- [x] Sanity checks: norms of a few known weight matrices match a Python
       reference.
 
 Exit criteria: model constructed from a real TinyLlama GGUF; one forward pass
@@ -181,15 +181,15 @@ on a fixed input matches reference logits within small tolerance.
 
 Scope: turn strings into token ids and back.
 
-- [ ] Choose path:
+- [x] Choose path:
   - Preferred: pull the vocab / scores / merges straight from the **GGUF
     metadata** parsed in Stage 6 (`tokenizer.ggml.*` keys) — no separate
     tokenizer file needed, and
   - Simpler stopgap: pre-encode prompts in Python and feed token ids to the
     engine while the C++ tokenizer matures.
-- [ ] Implement encode / decode for the chat template used by TinyLlama-Chat
+- [x] Implement encode / decode for the chat template used by TinyLlama-Chat
       (`<|system|>`, `<|user|>`, `<|assistant|>`).
-- [ ] Round-trip test on a known string.
+- [x] Round-trip test on a known string.
 
 Exit criteria: `encode(decode(ids)) == ids` for a handful of prompts; chat
 template produces the same ids as the HF tokenizer for a fixed example.
@@ -198,8 +198,8 @@ template produces the same ids as the HF tokenizer for a fixed example.
 
 Scope: glue real weights + real tokenizer + real generation.
 
-- [ ] Greedy continuation of a real prompt with real TinyLlama weights.
-- [ ] Match a Python reference for the first ~20 tokens (allow small
+- [x] Greedy continuation of a real prompt with real TinyLlama weights.
+- [x] Match a Python reference for the first ~20 tokens (allow small
       numerical drift later in the sequence).
 
 Exit criteria: a short prompt produces a coherent continuation that matches

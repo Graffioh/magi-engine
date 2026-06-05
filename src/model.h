@@ -1,3 +1,5 @@
+#pragma once
+
 #include "layers.h"
 #include "model_config.h"
 #include "utils.h"

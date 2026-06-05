@@ -9,15 +9,42 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(magi_engine
   src/main.cpp
+  src/gguf.cpp
+  src/gguf_model.cpp
   src/layers.cpp
   src/mmap.cpp
   src/model.cpp
   src/ops.cpp
   src/tensor.cpp
+  src/tokenizer.cpp
   src/utils.cpp
 )
 
 target_compile_options(magi_engine PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+)
+
+# Standalone GGUF inference entrypoint (also the C++ half of the numerical
+# correctness gate). Same source set the Model needs, plus the gguf loader and
+# the gguf->Model adapter.
+add_executable(magi_run
+  src/run_gguf.cpp
+  src/gguf.cpp
+  src/gguf_model.cpp
+  src/layers.cpp
+  src/mmap.cpp
+  src/model.cpp
+  src/ops.cpp
+  src/tensor.cpp
+  src/tokenizer.cpp
+  src/utils.cpp
+)
+
+target_include_directories(magi_run PRIVATE src)
+
+target_compile_options(magi_run PRIVATE
   -Wall
   -Wextra
   -Wpedantic
@@ -30,20 +57,28 @@ add_executable(magi_tests
   tests/test_mmap.cpp
   tests/test_layers.cpp
   tests/test_golden.cpp
+  tests/test_gguf.cpp
+  tests/test_gguf_model.cpp
+  tests/test_tokenizer.cpp
+  src/gguf.cpp
+  src/gguf_model.cpp
   src/layers.cpp
   src/mmap.cpp
   src/model.cpp
   src/ops.cpp
   src/tensor.cpp
+  src/tokenizer.cpp
   src/utils.cpp
 )
 
 target_include_directories(magi_tests PRIVATE src)
 
-# Absolute path to the generated golden fixtures, so tests don't depend on the
-# working directory. Blobs are gitignored; regenerate with tools/gen_golden_weights.py.
+# Absolute paths to the generated test fixtures, so tests don't depend on the
+# working directory. Both are gitignored; regenerate the golden blobs with
+# tools/gen_golden_weights.py and the GGUF fixture with tools/gen_tiny_gguf.py.
 target_compile_definitions(magi_tests PRIVATE
   MAGI_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden"
+  MAGI_GGUF_DIR="${CMAKE_SOURCE_DIR}/tests/gguf"
 )
 
 target_compile_options(magi_tests PRIVATE

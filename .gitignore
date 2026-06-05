@@ -36,8 +36,14 @@ magi_engine
 *.gguf
 *.onnx
 
+# Downloaded / converted model files (regenerate with: python3 tools/make_f32_gguf.py)
+models/
+
 # Generated golden fixtures (regenerate with: python3 tools/gen_golden_weights.py)
 tests/golden/
+
+# Generated GGUF fixtures (regenerate with: python3 tools/gen_tiny_gguf.py)
+tests/gguf/
 
 # Editor and OS noise
 .DS_Store
